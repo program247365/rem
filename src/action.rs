@@ -12,4 +12,17 @@ pub enum Action {
     ClearScreen,
     Error(String),
     Help,
+    // Navigation actions
+    Up,
+    Down,
+    Left,
+    Right,
+    Enter,
+    Back,
+    // EventKit actions
+    CheckPermissions,
+    RequestPermissions,
+    LoadLists,
+    LoadReminders(String),
+    SelectList(String),
 }

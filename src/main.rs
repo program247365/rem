@@ -10,6 +10,7 @@ mod cli;
 mod components;
 mod config;
 mod errors;
+mod eventkit;
 mod logging;
 mod tui;
 

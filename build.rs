@@ -9,5 +9,12 @@ fn main() -> Result<()> {
         .add_instructions(&build)?
         .add_instructions(&gix)?
         .add_instructions(&cargo)?
-        .emit()
+        .emit()?;
+
+    // Link EventKit framework on macOS
+    println!("cargo:rustc-link-lib=framework=EventKit");
+    println!("cargo:rustc-link-lib=framework=Foundation");
+    println!("cargo:rustc-link-lib=framework=CoreFoundation");
+
+    Ok(())
 }
