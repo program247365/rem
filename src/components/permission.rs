@@ -3,11 +3,20 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style, Stylize},
+    style::{Color, Style, Stylize, Modifier},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap, BorderType},
 };
 use tokio::sync::mpsc::UnboundedSender;
+
+// Macro for conditional debug logging based on DEBUG environment variable
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        if std::env::var("DEBUG").unwrap_or_default() == "true" {
+            eprintln!($($arg)*);
+        }
+    };
+}
 
 use crate::{
     action::Action,
@@ -48,12 +57,15 @@ impl PermissionComponent {
     }
 
     fn check_permissions(&mut self) -> Result<()> {
+        // Try to initialize EventKit with better error handling
         match EventKitManager::new() {
             Ok(manager) => {
                 let status = manager.check_permission_status();
+                debug_log!("Debug: Permission status: {:?}", status);
 
                 match status {
                     PermissionStatus::Authorized => {
+                        debug_log!("Debug: Permission already authorized, loading lists");
                         self.state = PermissionState::Granted;
                         self.eventkit = Some(manager);
                         if let Some(tx) = &self.command_tx {
@@ -61,19 +73,25 @@ impl PermissionComponent {
                         }
                     }
                     PermissionStatus::NotDetermined => {
+                        debug_log!("Debug: Permission not determined, needs permission");
                         self.state = PermissionState::NeedsPermission;
                         self.eventkit = Some(manager);
                     }
                     PermissionStatus::Denied => {
+                        debug_log!("Debug: Permission denied");
                         self.state = PermissionState::Denied;
                     }
                     PermissionStatus::Restricted => {
+                        debug_log!("Debug: Permission restricted");
                         self.state = PermissionState::Error("Reminders access is restricted".to_string());
                     }
                 }
             }
             Err(e) => {
-                self.state = PermissionState::Error(format!("Failed to initialize EventKit: {}", e));
+                // More specific error handling
+                let error_msg = format!("EventKit initialization failed: {}", e);
+                debug_log!("Debug: {}", error_msg);
+                self.state = PermissionState::Error(error_msg);
             }
         }
 
@@ -110,8 +128,36 @@ impl PermissionComponent {
     }
 
     fn render_checking(&self, f: &mut Frame, area: Rect) {
-        let paragraph = Paragraph::new("Checking Reminders permissions...")
-            .block(Block::default().borders(Borders::ALL).title("Rem"))
+        let checking_text = vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(Span::styled(
+                "🔍 Checking permissions...",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Please wait",
+                Style::default().fg(Color::Gray)
+            )),
+        ];
+
+        let paragraph = Paragraph::new(checking_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " 📝 Rem - Apple Reminders ",
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Blue))
+            )
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
@@ -121,22 +167,57 @@ impl PermissionComponent {
     fn render_needs_permission(&self, f: &mut Frame, area: Rect) {
         let text = vec![
             Line::from(""),
-            Line::from("Rem needs access to your Reminders."),
+            Line::from(Span::styled(
+                "🔐 Permission Required",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            )),
             Line::from(""),
-            Line::from("This allows the app to:"),
-            Line::from("• View your reminder lists"),
-            Line::from("• Read and display your reminders"),
-            Line::from("• Mark reminders as complete"),
+            Line::from(Span::styled(
+                "Rem needs access to your Apple Reminders",
+                Style::default().fg(Color::White)
+            )),
             Line::from(""),
+            Line::from(Span::styled(
+                "This allows the app to:",
+                Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD)
+            )),
             Line::from(vec![
-                Span::styled("Press ", Style::default()),
-                Span::styled("Enter", Style::default().fg(Color::Green).bold()),
-                Span::styled(" to grant access", Style::default()),
+                Span::styled("  📋 ", Style::default().fg(Color::Cyan)),
+                Span::styled("View your reminder lists", Style::default().fg(Color::Gray)),
             ]),
             Line::from(vec![
-                Span::styled("Press ", Style::default()),
-                Span::styled("q", Style::default().fg(Color::Red).bold()),
-                Span::styled(" to quit", Style::default()),
+                Span::styled("  👀 ", Style::default().fg(Color::Cyan)),
+                Span::styled("Read and display your reminders", Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(vec![
+                Span::styled("  ✅ ", Style::default().fg(Color::Cyan)),
+                Span::styled("Mark reminders as complete", Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(""),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Press ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "Enter",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray)
+                ),
+                Span::styled(" to grant access", Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(vec![
+                Span::styled("Press ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "q",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray)
+                ),
+                Span::styled(" to quit", Style::default().fg(Color::Gray)),
             ]),
         ];
 
@@ -144,7 +225,15 @@ impl PermissionComponent {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Permissions Required"),
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " 🔐 Permissions Required ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Yellow))
             )
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
@@ -153,12 +242,47 @@ impl PermissionComponent {
     }
 
     fn render_requesting(&self, f: &mut Frame, area: Rect) {
-        let paragraph = Paragraph::new(
-            "Requesting permissions...\n\nPlease check the system dialog and grant access.",
-        )
-        .block(Block::default().borders(Borders::ALL).title("Rem"))
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true });
+        let requesting_text = vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(Span::styled(
+                "⏳ Requesting permissions...",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Please check the system dialog",
+                Style::default().fg(Color::White)
+            )),
+            Line::from(Span::styled(
+                "and grant access to continue",
+                Style::default().fg(Color::White)
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "💡 Look for the macOS permission dialog",
+                Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC)
+            )),
+        ];
+
+        let paragraph = Paragraph::new(requesting_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " 📝 Rem - Requesting Access ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Yellow))
+            )
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true });
 
         f.render_widget(paragraph, area);
     }

@@ -3,11 +3,20 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style, Stylize},
+    style::{Color, Style, Modifier},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap, BorderType, Padding},
 };
 use tokio::sync::mpsc::UnboundedSender;
+
+// Macro for conditional debug logging based on DEBUG environment variable
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        if std::env::var("DEBUG").unwrap_or_default() == "true" {
+            eprintln!($($arg)*);
+        }
+    };
+}
 
 use crate::{
     action::Action,
@@ -46,12 +55,19 @@ impl RemindersComponent {
         }
     }
 
-    pub async fn load_reminders(&mut self, eventkit: &EventKitManager) -> Result<()> {
+    pub fn load_reminders(&mut self, eventkit: &EventKitManager) -> Result<()> {
         self.loading = true;
         self.error = None;
+        debug_log!("Debug: Loading reminders for list: {}", self.list_id);
 
         match eventkit.get_reminders_for_list(&self.list_id) {
             Ok(reminders) => {
+                debug_log!("Debug: Loaded {} reminders for list '{}'", reminders.len(), self.list_title);
+                if std::env::var("DEBUG").unwrap_or_default() == "true" {
+                    for (i, reminder) in reminders.iter().enumerate() {
+                        eprintln!("Debug: Reminder {}: {} (completed: {})", i, reminder.title, reminder.completed);
+                    }
+                }
                 self.reminders = reminders;
                 self.loading = false;
                 if !self.reminders.is_empty() {
@@ -60,6 +76,7 @@ impl RemindersComponent {
                 }
             }
             Err(e) => {
+                debug_log!("Debug: Failed to load reminders: {}", e);
                 self.error = Some(format!("Failed to load reminders: {e}"));
                 self.loading = false;
             }
@@ -102,11 +119,35 @@ impl RemindersComponent {
     }
 
     fn render_loading(&self, f: &mut Frame, area: Rect) {
-        let paragraph = Paragraph::new("Loading reminders...")
+        let loading_text = vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(Span::styled(
+                "⏳ Loading reminders...",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Please wait",
+                Style::default().fg(Color::Gray)
+            )),
+        ];
+
+        let paragraph = Paragraph::new(loading_text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(self.list_title.clone()),
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        format!(" 📋 {} ", self.list_title),
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Blue))
             )
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
@@ -118,21 +159,39 @@ impl RemindersComponent {
         let text = vec![
             Line::from(""),
             Line::from(Span::styled(
-                "Error",
-                Style::default().fg(Color::Red).bold(),
+                "⚠️  Error Loading Reminders",
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from(error),
+            Line::from(Span::styled(
+                error,
+                Style::default().fg(Color::White)
+            )),
+            Line::from(""),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Press ", Style::default()),
-                Span::styled("r", Style::default().fg(Color::Green).bold()),
-                Span::styled(" to retry", Style::default()),
+                Span::styled("Press ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "r",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray)
+                ),
+                Span::styled(" to retry", Style::default().fg(Color::Gray)),
             ]),
             Line::from(vec![
-                Span::styled("Press ", Style::default()),
-                Span::styled("Esc", Style::default().fg(Color::Yellow).bold()),
-                Span::styled(" to go back", Style::default()),
+                Span::styled("Press ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "Esc",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray)
+                ),
+                Span::styled(" to go back", Style::default().fg(Color::Gray)),
             ]),
         ];
 
@@ -140,7 +199,15 @@ impl RemindersComponent {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(self.list_title.clone()),
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        format!(" ❌ {} ", self.list_title),
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Red))
             )
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
@@ -151,55 +218,94 @@ impl RemindersComponent {
     fn render_reminders(&mut self, f: &mut Frame, area: Rect) {
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(3)])
+            .constraints([Constraint::Min(0), Constraint::Length(4)])
+            .margin(1)
             .split(area);
 
         if self.reminders.is_empty() {
-            let paragraph = Paragraph::new("No reminders found")
+            let empty_text = vec![
+                Line::from(""),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "✅ All done!",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "No reminders in this list",
+                    Style::default().fg(Color::Gray)
+                )),
+            ];
+
+            let paragraph = Paragraph::new(empty_text)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(self.list_title.clone()),
+                        .border_type(BorderType::Rounded)
+                        .title(Span::styled(
+                            format!(" 📋 {} ", self.list_title),
+                            Style::default()
+                                .fg(Color::Blue)
+                                .add_modifier(Modifier::BOLD)
+                        ))
+                        .title_alignment(Alignment::Center)
+                        .style(Style::default().fg(Color::Blue))
                 )
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true });
 
             f.render_widget(paragraph, main_layout[0]);
         } else {
-            // Create list items for reminders
+            // Create beautiful reminder items with enhanced styling
             let items: Vec<ListItem> = self
                 .reminders
                 .iter()
                 .enumerate()
                 .map(|(i, reminder)| {
-                    let completion_symbol = if reminder.completed { "✓" } else { "○" };
+                    let is_selected = i == self.selected_index;
+                    
+                    let completion_symbol = if reminder.completed { "✅" } else { "⭕" };
                     let completion_style = if reminder.completed {
-                        Style::default().fg(Color::Green)
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::Gray)
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                     };
 
                     let title_style = if reminder.completed {
-                        Style::default().fg(Color::Gray).crossed_out()
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::CROSSED_OUT | Modifier::ITALIC)
+                    } else if is_selected {
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
+                            .fg(Color::LightBlue)
+                            .add_modifier(Modifier::BOLD)
                     };
 
                     let priority_symbol = match reminder.priority {
-                        1 => "!!!",
-                        2 => "!!",
-                        3 => "!",
+                        1 => "🔴",
+                        2 => "🟡",
+                        3 => "🟢",
                         _ => "",
                     };
 
                     let mut lines = vec![Line::from(vec![
+                        Span::styled(
+                            if is_selected { "▶ " } else { "  " },
+                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                        ),
                         Span::styled(completion_symbol, completion_style),
-                        Span::raw(" "),
+                        Span::raw("  "),
                         Span::styled(&reminder.title, title_style),
                         if !priority_symbol.is_empty() {
                             Span::styled(
                                 format!(" {priority_symbol}"),
-                                Style::default().fg(Color::Red),
+                                Style::default()
                             )
                         } else {
                             Span::raw("")
@@ -208,19 +314,42 @@ impl RemindersComponent {
 
                     if let Some(notes) = &reminder.notes {
                         if !notes.is_empty() {
-                            lines.push(Line::from(format!("  {notes}")));
+                            lines.push(Line::from(vec![
+                                Span::raw("    "),
+                                Span::styled(
+                                    format!("💭 {notes}"),
+                                    Style::default().fg(if is_selected {
+                                        Color::Gray
+                                    } else {
+                                        Color::DarkGray
+                                    }).add_modifier(Modifier::ITALIC)
+                                )
+                            ]));
                         }
                     }
 
                     if let Some(due_date) = &reminder.due_date {
                         lines.push(Line::from(vec![
-                            Span::raw("  Due: "),
-                            Span::styled(due_date, Style::default().fg(Color::Yellow)),
+                            Span::raw("    "),
+                            Span::styled("📅 Due: ", Style::default().fg(Color::Yellow)),
+                            Span::styled(
+                                due_date,
+                                Style::default()
+                                    .fg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD)
+                            ),
                         ]));
                     }
 
-                    let style = if i == self.selected_index {
-                        Style::default().bg(Color::DarkGray)
+                    // Add spacing between items
+                    if i < self.reminders.len() - 1 {
+                        lines.push(Line::from(""));
+                    }
+
+                    let style = if is_selected {
+                        Style::default()
+                            .bg(Color::DarkGray)
+                            .fg(Color::White)
                     } else {
                         Style::default()
                     };
@@ -233,28 +362,50 @@ impl RemindersComponent {
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(self.list_title.clone()),
+                        .border_type(BorderType::Rounded)
+                        .title(Span::styled(
+                            format!(" 📋 {} ", self.list_title),
+                            Style::default()
+                                .fg(Color::Blue)
+                                .add_modifier(Modifier::BOLD)
+                        ))
+                        .title_alignment(Alignment::Center)
+                        .style(Style::default().fg(Color::Blue))
+                        .padding(Padding::horizontal(1))
                 )
-                .highlight_style(Style::default().bg(Color::DarkGray))
-                .highlight_symbol("❯ ");
+                .highlight_style(
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD)
+                );
 
             f.render_stateful_widget(list_widget, main_layout[0], &mut self.list_state);
         }
 
-        // Instructions at the bottom
+        // Enhanced instructions at the bottom
         let instructions = Paragraph::new(vec![Line::from(vec![
-            Span::styled("j/k", Style::default().fg(Color::Green).bold()),
-            Span::raw(" or "),
-            Span::styled("↑/↓", Style::default().fg(Color::Green).bold()),
-            Span::raw(" to navigate • "),
-            Span::styled("Space", Style::default().fg(Color::Green).bold()),
-            Span::raw(" to toggle • "),
-            Span::styled("Esc", Style::default().fg(Color::Yellow).bold()),
-            Span::raw(" to go back • "),
-            Span::styled("q", Style::default().fg(Color::Red).bold()),
-            Span::raw(" to quit"),
+            Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" or ", Style::default().fg(Color::Gray)),
+            Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
+            Span::styled("Space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
+            Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" back  ", Style::default().fg(Color::Gray)),
+            Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" quit", Style::default().fg(Color::Gray)),
         ])])
-        .block(Block::default().borders(Borders::ALL))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    " Controls ",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                ))
+                .title_alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Yellow))
+        )
         .alignment(Alignment::Center);
 
         f.render_widget(instructions, main_layout[1]);

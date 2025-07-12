@@ -3,11 +3,20 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style, Stylize},
+    style::{Color, Style, Modifier},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap, BorderType, Padding},
 };
 use tokio::sync::mpsc::UnboundedSender;
+
+// Macro for conditional debug logging based on DEBUG environment variable
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        if std::env::var("DEBUG").unwrap_or_default() == "true" {
+            eprintln!($($arg)*);
+        }
+    };
+}
 
 use crate::{
     action::Action,
@@ -45,9 +54,16 @@ impl ListsComponent {
     pub fn load_lists(&mut self, eventkit: &EventKitManager) -> Result<()> {
         self.loading = true;
         self.error = None;
+        debug_log!("Debug: Loading lists...");
 
         match eventkit.get_reminder_lists() {
             Ok(lists) => {
+                debug_log!("Debug: Loaded {} lists", lists.len());
+                if std::env::var("DEBUG").unwrap_or_default() == "true" {
+                    for (i, list) in lists.iter().enumerate() {
+                        eprintln!("Debug: List {}: {} ({} reminders)", i, list.title, list.reminder_count);
+                    }
+                }
                 self.lists = lists;
                 self.loading = false;
                 if !self.lists.is_empty() {
@@ -56,6 +72,7 @@ impl ListsComponent {
                 }
             }
             Err(e) => {
+                debug_log!("Debug: Failed to load lists: {}", e);
                 self.error = Some(format!("Failed to load lists: {e}"));
                 self.loading = false;
             }
@@ -99,8 +116,36 @@ impl ListsComponent {
     }
 
     fn render_loading(&self, f: &mut Frame, area: Rect) {
-        let paragraph = Paragraph::new("Loading reminder lists...")
-            .block(Block::default().borders(Borders::ALL).title("Rem"))
+        let loading_text = vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(Span::styled(
+                "✨ Loading your reminders...",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "⏳ Please wait",
+                Style::default().fg(Color::Gray)
+            )),
+        ];
+
+        let paragraph = Paragraph::new(loading_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " 📝 Rem - Apple Reminders ",
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Blue))
+            )
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
@@ -111,26 +156,56 @@ impl ListsComponent {
         let text = vec![
             Line::from(""),
             Line::from(Span::styled(
-                "Error",
-                Style::default().fg(Color::Red).bold(),
+                "⚠️  Error",
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from(error),
+            Line::from(Span::styled(
+                error,
+                Style::default().fg(Color::White)
+            )),
+            Line::from(""),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Press ", Style::default()),
-                Span::styled("r", Style::default().fg(Color::Green).bold()),
-                Span::styled(" to retry", Style::default()),
+                Span::styled("Press ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "r",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray)
+                ),
+                Span::styled(" to retry", Style::default().fg(Color::Gray)),
             ]),
             Line::from(vec![
-                Span::styled("Press ", Style::default()),
-                Span::styled("q", Style::default().fg(Color::Red).bold()),
-                Span::styled(" to quit", Style::default()),
+                Span::styled("Press ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "q",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray)
+                ),
+                Span::styled(" to quit", Style::default().fg(Color::Gray)),
             ]),
         ];
 
         let paragraph = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Error"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " ❌ Error ",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Red))
+            )
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
@@ -139,8 +214,36 @@ impl ListsComponent {
 
     fn render_lists(&mut self, f: &mut Frame, area: Rect) {
         if self.lists.is_empty() {
-            let paragraph = Paragraph::new("No reminder lists found")
-                .block(Block::default().borders(Borders::ALL).title("Rem"))
+            let empty_text = vec![
+                Line::from(""),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "📭 No reminder lists found",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Check your Apple Reminders app",
+                    Style::default().fg(Color::Gray)
+                )),
+            ];
+
+            let paragraph = Paragraph::new(empty_text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .title(Span::styled(
+                            " 📝 Rem - Apple Reminders ",
+                            Style::default()
+                                .fg(Color::Blue)
+                                .add_modifier(Modifier::BOLD)
+                        ))
+                        .title_alignment(Alignment::Center)
+                        .style(Style::default().fg(Color::Blue))
+                )
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true });
 
@@ -150,30 +253,76 @@ impl ListsComponent {
 
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(3)])
+            .constraints([Constraint::Min(0), Constraint::Length(4)])
+            .margin(1)
             .split(area);
 
-        // Create list items with card-like appearance
+        // Create beautiful list items with enhanced styling
         let items: Vec<ListItem> = self
             .lists
             .iter()
             .enumerate()
             .map(|(i, list)| {
+                let is_selected = i == self.selected_index;
+                let color = parse_color(&list.color);
+                
+                // Format reminder count with better styling
+                let count_text = if list.reminder_count == 0 {
+                    "Empty".to_string()
+                } else if list.reminder_count == 1 {
+                    "1 reminder".to_string()
+                } else {
+                    format!("{} reminders", list.reminder_count)
+                };
+
                 let mut lines = vec![
                     Line::from(vec![
-                        Span::styled("●", Style::default().fg(parse_color(&list.color))),
-                        Span::raw(" "),
-                        Span::styled(&list.title, Style::default().bold()),
+                        Span::styled(
+                            if is_selected { "▶ " } else { "  " },
+                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                        ),
+                        Span::styled(
+                            "●",
+                            Style::default()
+                                .fg(color)
+                                .add_modifier(Modifier::BOLD)
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            &list.title,
+                            Style::default()
+                                .fg(if is_selected { Color::White } else { Color::LightBlue })
+                                .add_modifier(if is_selected { 
+                                    Modifier::BOLD | Modifier::UNDERLINED 
+                                } else { 
+                                    Modifier::BOLD 
+                                })
+                        ),
                     ]),
-                    Line::from(format!("  {} reminders", list.reminder_count)),
+                    Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(
+                            count_text,
+                            Style::default().fg(if list.reminder_count == 0 {
+                                Color::DarkGray
+                            } else if is_selected {
+                                Color::Gray
+                            } else {
+                                Color::Gray
+                            })
+                        ),
+                    ]),
                 ];
 
-                if i == self.selected_index {
+                // Add spacing between items
+                if i < self.lists.len() - 1 {
                     lines.push(Line::from(""));
                 }
 
-                let style = if i == self.selected_index {
-                    Style::default().bg(Color::DarkGray)
+                let style = if is_selected {
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .fg(Color::White)
                 } else {
                     Style::default()
                 };
@@ -186,25 +335,47 @@ impl ListsComponent {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Reminder Lists"),
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " 📝 Your Reminder Lists ",
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Blue))
+                    .padding(Padding::horizontal(1))
             )
-            .highlight_style(Style::default().bg(Color::DarkGray))
-            .highlight_symbol("❯ ");
+            .highlight_style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD)
+            );
 
         f.render_stateful_widget(list_widget, main_layout[0], &mut self.list_state);
 
-        // Instructions at the bottom
+        // Enhanced instructions at the bottom
         let instructions = Paragraph::new(vec![Line::from(vec![
-            Span::styled("j/k", Style::default().fg(Color::Green).bold()),
-            Span::raw(" or "),
-            Span::styled("↑/↓", Style::default().fg(Color::Green).bold()),
-            Span::raw(" to navigate • "),
-            Span::styled("Enter", Style::default().fg(Color::Green).bold()),
-            Span::raw(" to select • "),
-            Span::styled("q", Style::default().fg(Color::Red).bold()),
-            Span::raw(" to quit"),
+            Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" or ", Style::default().fg(Color::Gray)),
+            Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
+            Span::styled("⏎", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" select  ", Style::default().fg(Color::Gray)),
+            Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" quit", Style::default().fg(Color::Gray)),
         ])])
-        .block(Block::default().borders(Borders::ALL))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    " Controls ",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                ))
+                .title_alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Yellow))
+        )
         .alignment(Alignment::Center);
 
         f.render_widget(instructions, main_layout[1]);

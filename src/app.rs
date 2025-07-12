@@ -259,19 +259,12 @@ impl App {
                     }
                 }
                 Action::LoadReminders(ref list_id) => {
-                    if let Some(_reminders_component) = &mut self.reminders_component {
-                        if let Some(_eventkit) = &self.eventkit {
-                            // Load reminders in background
-                            let eventkit_clone = EventKitManager::new()?;
-                            let _action_tx = self.action_tx.clone();
-                            let list_id_clone = list_id.clone();
-                            tokio::spawn(async move {
-                                if let Ok(_reminders) =
-                                    eventkit_clone.get_reminders_for_list(&list_id_clone)
-                                {
-                                    // For now, just proceed - in a real implementation, you'd update the component
-                                }
-                            });
+                    if let Some(reminders_component) = &mut self.reminders_component {
+                        if let Some(eventkit) = &self.eventkit {
+                            // Load reminders directly into the component
+                            if let Err(e) = reminders_component.load_reminders(eventkit) {
+                                eprintln!("Failed to load reminders: {}", e);
+                            }
                         }
                     }
                 }

@@ -5,6 +5,15 @@ use std::ptr;
 use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
+// Macro for conditional debug logging based on DEBUG environment variable
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        if std::env::var("DEBUG").unwrap_or_default() == "true" {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 // Force link EventKit framework
 #[link(name = "EventKit", kind = "framework")]
 #[link(name = "Foundation", kind = "framework")]
@@ -56,12 +65,20 @@ pub struct EventKitManager {
 impl EventKitManager {
     pub fn new() -> Result<Self> {
         unsafe {
+            // Check if EventKit framework is available
             let event_store_class = Class::get("EKEventStore")
-                .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get EKEventStore class"))?;
+                .ok_or_else(|| color_eyre::eyre::eyre!("Failed to get EKEventStore class - EventKit framework may not be linked or available"))?;
+            
             let event_store: *mut Object = msg_send![event_store_class, new];
             
             if event_store.is_null() {
                 return Err(color_eyre::eyre::eyre!("Failed to create EKEventStore instance"));
+            }
+            
+            // Test basic functionality
+            let calendars: *mut Object = msg_send![event_store, calendarsForEntityType: 1i64];
+            if calendars.is_null() {
+                return Err(color_eyre::eyre::eyre!("Failed to access calendars - EventKit may not be properly initialized"));
             }
             
             Ok(EventKitManager { event_store })
@@ -70,7 +87,10 @@ impl EventKitManager {
 
     pub fn check_permission_status(&self) -> PermissionStatus {
         unsafe {
-            let event_store_class = Class::get("EKEventStore").unwrap();
+            let event_store_class = match Class::get("EKEventStore") {
+                Some(class) => class,
+                None => return PermissionStatus::NotDetermined,
+            };
             let entity_type_reminder: i64 = 1; // EKEntityTypeReminder
             let status: i64 = msg_send![event_store_class, authorizationStatusForEntityType: entity_type_reminder];
             PermissionStatus::from(status)
@@ -111,8 +131,10 @@ impl EventKitManager {
 
     pub fn get_reminder_lists(&self) -> Result<Vec<ReminderList>> {
         unsafe {
+            debug_log!("Debug: Getting reminder lists...");
             let calendars: *mut Object = msg_send![self.event_store, calendarsForEntityType: 1i64];
             let count: usize = msg_send![calendars, count];
+            debug_log!("Debug: Found {} calendars", count);
             
             let mut lists = Vec::new();
             
@@ -132,6 +154,8 @@ impl EventKitManager {
                     .to_string_lossy()
                     .into_owned();
                 
+                debug_log!("Debug: Processing calendar '{}' with ID '{}'", title, id);
+                
                 // Get color (simplified - generating a color based on index)
                 let color_string = format!(
                     "#{:02x}{:02x}{:02x}",
@@ -142,6 +166,7 @@ impl EventKitManager {
                 
                 // Get reminder count for this list
                 let reminder_count = self.get_reminder_count_for_list(&id)?;
+                debug_log!("Debug: Calendar '{}' has {} reminders", title, reminder_count);
                 
                 lists.push(ReminderList {
                     id,
@@ -151,17 +176,20 @@ impl EventKitManager {
                 });
             }
             
+            debug_log!("Debug: Returning {} reminder lists", lists.len());
             Ok(lists)
         }
     }
 
     pub fn get_reminders_for_list(&self, list_id: &str) -> Result<Vec<Reminder>> {
-        unsafe {
+        debug_log!("Debug: Getting reminders for list ID using AppleScript: {}", list_id);
+        
+        // First get the list name from EventKit
+        let list_name = unsafe {
             let calendars: *mut Object = msg_send![self.event_store, calendarsForEntityType: 1i64];
             let count: usize = msg_send![calendars, count];
             
-            // Find the calendar with matching ID
-            let mut target_calendar: *mut Object = ptr::null_mut();
+            let mut found_title = "Unknown".to_string();
             for i in 0..count {
                 let calendar: *mut Object = msg_send![calendars, objectAtIndex: i];
                 let calendar_identifier: *mut Object = msg_send![calendar, calendarIdentifier];
@@ -169,110 +197,173 @@ impl EventKitManager {
                 let id = std::ffi::CStr::from_ptr(id_ptr).to_string_lossy();
                 
                 if id == list_id {
-                    target_calendar = calendar;
+                    let title_nsstring: *mut Object = msg_send![calendar, title];
+                    let title_ptr: *const i8 = msg_send![title_nsstring, UTF8String];
+                    let title = std::ffi::CStr::from_ptr(title_ptr).to_string_lossy().into_owned();
+                    debug_log!("Debug: Found calendar name for reminders: {}", title);
+                    found_title = title;
                     break;
                 }
             }
-            
-            if target_calendar.is_null() {
-                return Ok(Vec::new());
-            }
-            
-            // Create NSArray with the calendar - simplified approach
-            let calendar_array: *mut Object = unsafe {
-                let array_class = Class::get("NSArray").unwrap();
-                let array: *mut Object = msg_send![array_class, arrayWithObject: target_calendar];
-                array
-            };
-            
-            // Create predicate for reminders in this calendar
-            let predicate: *mut Object = msg_send![self.event_store, 
-                predicateForRemindersInCalendars: calendar_array
-            ];
-            
-            // Use fetchRemindersMatchingPredicate to get reminders
-            // This is async in EventKit, so we'll use a simplified synchronous approach
-            let (tx, rx) = std::sync::mpsc::channel();
-            let tx = Arc::new(Mutex::new(Some(tx)));
-            
-            let completion_block = block::ConcreteBlock::new(move |reminders: *mut Object| {
-                if let Ok(mut tx_guard) = tx.lock() {
-                    if let Some(tx) = tx_guard.take() {
-                        let _ = tx.send(reminders);
-                    }
-                }
-            });
-            
-            let completion_block = completion_block.copy();
-            
-            let _: () = msg_send![self.event_store, 
-                fetchRemindersMatchingPredicate: predicate 
-                completion: completion_block
-            ];
-            
-            // Wait for the result (with timeout)
-            match rx.recv_timeout(std::time::Duration::from_secs(5)) {
-                Ok(reminders_array) => {
-                    let count: usize = msg_send![reminders_array, count];
-                    let mut reminders = Vec::new();
+            found_title
+        };
+        
+        // Use AppleScript to get reminders data
+        let script = format!(
+            r#"tell application "Reminders"
+                try
+                    set reminderList to list "{}"
+                    set reminderItems to reminders in reminderList
+                    set resultList to {{}}
                     
-                    for i in 0..count {
-                        let reminder: *mut Object = msg_send![reminders_array, objectAtIndex: i];
+                    repeat with aReminder in reminderItems
+                        set reminderName to name of aReminder
+                        set reminderCompleted to completed of aReminder
+                        set reminderBody to body of aReminder
                         
-                        // Extract reminder data
-                        let title_nsstring: *mut Object = msg_send![reminder, title];
-                        let title_ptr: *const i8 = msg_send![title_nsstring, UTF8String];
-                        let title = std::ffi::CStr::from_ptr(title_ptr)
-                            .to_string_lossy()
-                            .into_owned();
+                        -- Format: "NAME|COMPLETED|BODY"
+                        if reminderBody is missing value then
+                            set reminderData to reminderName & "|" & (reminderCompleted as string) & "|"
+                        else
+                            set reminderData to reminderName & "|" & (reminderCompleted as string) & "|" & reminderBody
+                        end if
                         
-                        let notes_nsstring: *mut Object = msg_send![reminder, notes];
-                        let notes = if !notes_nsstring.is_null() {
-                            let notes_ptr: *const i8 = msg_send![notes_nsstring, UTF8String];
-                            Some(std::ffi::CStr::from_ptr(notes_ptr)
-                                .to_string_lossy()
-                                .into_owned())
-                        } else {
-                            None
-                        };
-                        
-                        let completed: BOOL = msg_send![reminder, isCompleted];
-                        let priority: i64 = msg_send![reminder, priority];
-                        
-                        let reminder_id_nsstring: *mut Object = msg_send![reminder, calendarItemIdentifier];
-                        let id_ptr: *const i8 = msg_send![reminder_id_nsstring, UTF8String];
-                        let id = std::ffi::CStr::from_ptr(id_ptr)
-                            .to_string_lossy()
-                            .into_owned();
-                        
-                        // Get due date
-                        let due_date_obj: *mut Object = msg_send![reminder, dueDateComponents];
-                        let due_date = if !due_date_obj.is_null() {
-                            Some("Due date set".to_string()) // Simplified
+                        set end of resultList to reminderData
+                    end repeat
+                    
+                    set AppleScript's text item delimiters to "~REMINDER~"
+                    set resultString to resultList as string
+                    set AppleScript's text item delimiters to ""
+                    
+                    return resultString
+                on error errorMessage
+                    return "ERROR:" & errorMessage
+                end try
+            end tell"#,
+            list_name.replace("\"", "\\\"")
+        );
+        
+        debug_log!("Debug: Running AppleScript for reminders");
+        
+        match std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+        {
+            Ok(output) => {
+                let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                debug_log!("Debug: AppleScript reminders result length: {}", result.len());
+                
+                if result.starts_with("ERROR:") {
+                    debug_log!("Debug: AppleScript error: {}", result);
+                    return Ok(Vec::new());
+                }
+                
+                let mut reminders = Vec::new();
+                let reminder_data_list: Vec<&str> = result.split("~REMINDER~").collect();
+                
+                for (index, reminder_data) in reminder_data_list.iter().enumerate() {
+                    if reminder_data.is_empty() {
+                        continue;
+                    }
+                    
+                    let parts: Vec<&str> = reminder_data.split('|').collect();
+                    if parts.len() >= 2 {
+                        let title = parts[0].to_string();
+                        let completed = parts[1] == "true";
+                        let notes = if parts.len() > 2 && !parts[2].is_empty() {
+                            Some(parts[2].to_string())
                         } else {
                             None
                         };
                         
                         reminders.push(Reminder {
-                            id,
+                            id: format!("reminder-{}-{}", list_name.to_lowercase(), index),
                             title,
                             notes,
-                            completed: completed == YES,
-                            priority: priority.min(3) as u8,
-                            due_date,
+                            completed,
+                            priority: 0, // AppleScript doesn't easily expose priority
+                            due_date: None, // We could add due date parsing later
                         });
+                        
+                        debug_log!("Debug: Added AppleScript reminder: {}", reminders.last().unwrap().title);
                     }
-                    
-                    Ok(reminders)
                 }
-                Err(_) => Ok(Vec::new()), // Timeout
+                
+                debug_log!("Debug: Returning {} AppleScript reminders", reminders.len());
+                Ok(reminders)
+            }
+            Err(e) => {
+                debug_log!("Debug: AppleScript execution failed: {}", e);
+                Ok(Vec::new())
             }
         }
     }
 
-    fn get_reminder_count_for_list(&self, _list_id: &str) -> Result<usize> {
-        // For now, return 0 - in a real implementation you'd count the reminders
-        Ok(0)
+    fn get_reminder_count_for_list(&self, list_id: &str) -> Result<usize> {
+        debug_log!("Debug: Getting reminder count for list ID using AppleScript: {}", list_id);
+        
+        // First get the list name from EventKit
+        let list_name = unsafe {
+            let calendars: *mut Object = msg_send![self.event_store, calendarsForEntityType: 1i64];
+            let count: usize = msg_send![calendars, count];
+            
+            let mut found_title = "Unknown".to_string();
+            for i in 0..count {
+                let calendar: *mut Object = msg_send![calendars, objectAtIndex: i];
+                let calendar_identifier: *mut Object = msg_send![calendar, calendarIdentifier];
+                let id_ptr: *const i8 = msg_send![calendar_identifier, UTF8String];
+                let id = std::ffi::CStr::from_ptr(id_ptr).to_string_lossy();
+                
+                if id == list_id {
+                    let title_nsstring: *mut Object = msg_send![calendar, title];
+                    let title_ptr: *const i8 = msg_send![title_nsstring, UTF8String];
+                    let title = std::ffi::CStr::from_ptr(title_ptr).to_string_lossy().into_owned();
+                    debug_log!("Debug: Found calendar name: {}", title);
+                    found_title = title;
+                    break;
+                }
+            }
+            found_title
+        };
+        
+        // Use AppleScript to get reminder count
+        let script = format!(
+            r#"tell application "Reminders"
+                try
+                    set listCount to count of reminders in list "{}"
+                    return listCount as string
+                on error
+                    return "0"
+                end try
+            end tell"#,
+            list_name.replace("\"", "\\\"")
+        );
+        
+        debug_log!("Debug: Running AppleScript: {}", script);
+        
+        match std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+        {
+            Ok(output) => {
+                let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                debug_log!("Debug: AppleScript result: '{}'", result);
+                
+                if let Ok(count) = result.parse::<usize>() {
+                    debug_log!("Debug: Successfully parsed count: {}", count);
+                    Ok(count)
+                } else {
+                    debug_log!("Debug: Failed to parse count, returning 0");
+                    Ok(0)
+                }
+            }
+            Err(e) => {
+                debug_log!("Debug: AppleScript execution failed: {}", e);
+                Ok(0)
+            }
+        }
     }
 }
 
