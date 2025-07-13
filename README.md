@@ -10,11 +10,11 @@ A fast, beautiful Terminal User Interface (TUI) for Apple Reminders built with a
 - 📱 **Real Apple Reminders Data**: Direct integration with macOS Reminders app
 - ⌨️ **Vim-style Navigation**: Intuitive keyboard shortcuts (j/k, arrow keys)
 - 🎨 **Beautiful UI**: Modern terminal interface with colors, emojis, and rounded borders
-- ✅ **Interactive**: Toggle completion, delete reminders with vim-style 'dd', navigate seamlessly
+- ✅ **Full Management**: Create, toggle, delete reminders with comprehensive form interface
 - 🔍 **Live Data**: Real-time access to your actual reminders and lists
 - 🛡️ **Native Permissions**: Automatic permission handling with native macOS dialogs
 - 🏗️ **Modern Architecture**: Type-safe Swift-Rust communication via UniFFI
-- 🆕 **Enhanced Features**: Access to sub-tasks, tags, folders, and rich metadata
+- 📝 **Rich Creation**: Create reminders with title, notes, due dates, lists, and priorities
 
 ## 🖼️ Screenshots
 
@@ -31,9 +31,9 @@ A fast, beautiful Terminal User Interface (TUI) for Apple Reminders built with a
 │      12 reminders                                            │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
-┌───────────────────── Controls ─────────────────────┐
-│        ↑↓ or j/k navigate  ⏎ select  q quit        │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────── Controls ────────────────────────┐
+│  ↑↓ or j/k navigate  ⏎ select  c create  q quit         │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ## 🏗️ Architecture Overview
@@ -164,18 +164,33 @@ make dev
 
 > **Note**: Use `make run-direct` to avoid UniFFI checksum issues when the TUI integration is already built. This builds only the Swift executable without regenerating Rust bindings.
 
-### Navigation
+### Navigation & Controls
 
 **Lists View:**
 - `j`/`k` or `↑`/`↓` - Navigate between lists
 - `Enter` - Open selected list
+- `c` - Create new reminder
 - `q` - Quit application
 
 **Reminders View:**
 - `j`/`k` or `↑`/`↓` - Navigate between reminders
 - `Space` or `Enter` - Toggle reminder completion
-- `dd` - Delete selected reminder (vim-style)
+- `dd` or `Delete` - Delete selected reminder (vim-style)
+- `c` - Create new reminder
 - `q` or `Esc` - Go back to lists
+
+**Create Reminder Form:**
+- `Tab` - Navigate between form fields
+- `↑`/`↓` - Change list/priority selections
+- `Ctrl+S` - Save and create reminder
+- `q` or `Esc` - Cancel and return
+
+**Form Fields:**
+- **Title** - Text input for reminder title (required)
+- **Notes** - Multi-line text input for notes
+- **Date** - Due date in ISO8601 format (e.g., 2024-12-31T23:59:59Z)
+- **List** - Select target reminder list
+- **Priority** - Set priority level (0-9, where 0 = none)
 
 ### Permissions
 

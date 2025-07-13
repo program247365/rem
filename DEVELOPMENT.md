@@ -2,12 +2,47 @@
 
 This guide explains how to add new functionality to Rem through all layers of the Swift wrapper + Rust core architecture.
 
+## 🎮 Current Keyboard Controls
+
+### Lists View
+- `↑`/`↓` or `j`/`k` - Navigate between reminder lists
+- `Enter` - Open selected list to view reminders
+- `c` - Create new reminder (opens form)
+- `q` - Quit application
+
+### Reminders View  
+- `↑`/`↓` or `j`/`k` - Navigate between reminders
+- `Space` or `Enter` - Toggle reminder completion status
+- `dd` - Delete selected reminder (vim-style double-d)
+- `Delete` - Delete selected reminder (single key)
+- `c` - Create new reminder (opens form)
+- `q` or `Esc` - Go back to lists view
+
+### Create Reminder Form
+- `Tab` - Navigate forward through form fields
+- `Shift+Tab` - Navigate backward through form fields
+- `↑`/`↓` - Change list selection or priority value
+- `Ctrl+S` - Save and create reminder
+- `q` or `Esc` - Cancel form and return to previous view
+
+### Form Field Details
+1. **Title Field** - Type text for reminder title (required)
+2. **Notes Field** - Type multi-line notes (optional)
+3. **Date Field** - Enter due date in ISO8601 format (optional)
+4. **List Field** - Use ↑/↓ to select target list
+5. **Priority Field** - Use ↑/↓ to set priority (0-9, 0=none)
+
+### Key Sequence Timing
+- `dd` sequence: Must be pressed within 1 second
+- All other keys: Immediate response
+
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
 2. [Adding New TUI Actions](#adding-new-tui-actions)
 3. [Adding Swift Backend Services](#adding-swift-backend-services)
 4. [Step-by-Step Example: Delete Functionality](#step-by-step-example-delete-functionality)
+5. [Step-by-Step Example: Create Functionality](#step-by-step-example-create-functionality)
 5. [Testing New Features](#testing-new-features)
 6. [Common Patterns](#common-patterns)
 7. [Troubleshooting](#troubleshooting)
@@ -607,5 +642,190 @@ make build-uniffi
 - Verify key sequences work correctly
 - Test with empty lists and edge cases
 - Ensure proper cleanup of resources
+
+## Step-by-Step Example: Create Functionality
+
+The create reminder functionality demonstrates implementing a form-based UI with multiple fields and complex interactions.
+
+### 1. Define Form State Structure
+
+```rust
+// In rust-core/src/tui/app.rs
+#[derive(Clone, Debug)]
+struct CreateReminderForm {
+    title: String,
+    notes: String,
+    due_date: String,
+    selected_list_id: String,
+    priority: u8,
+    current_field: usize,  // Tracks which field is active
+}
+```
+
+### 2. Add Create Action to Enum
+
+```rust
+// In rust-core/src/lib.rs
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct NewReminder {
+    pub title: String,
+    pub notes: Option<String>,
+    pub due_date: Option<String>,
+    pub list_id: String,
+    pub priority: u8,
+}
+
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum TuiAction {
+    // ... existing actions
+    CreateReminder { new_reminder: NewReminder },
+}
+```
+
+### 3. Update UniFFI Interface
+
+```udl
+// In rust-core/src/rem_core.udl
+dictionary NewReminder {
+    string title;
+    string? notes;
+    string? due_date;
+    string list_id;
+    u8 priority;
+};
+
+[Enum]
+interface TuiAction {
+    // ... existing actions
+    CreateReminder(NewReminder new_reminder);
+}
+```
+
+### 4. Implement Form Key Handling
+
+```rust
+// In rust-core/src/tui/app.rs
+fn handle_create_reminder_key_event(&mut self, key: crossterm::event::KeyEvent) {
+    if let Some(ref mut form) = self.create_form {
+        match key.code {
+            KeyCode::Tab => {
+                form.current_field = (form.current_field + 1) % 5; // 5 fields
+            }
+            KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                if !form.title.trim().is_empty() {
+                    let new_reminder = crate::NewReminder {
+                        title: form.title.clone(),
+                        notes: if form.notes.trim().is_empty() { None } else { Some(form.notes.clone()) },
+                        due_date: if form.due_date.trim().is_empty() { None } else { Some(form.due_date.clone()) },
+                        list_id: form.selected_list_id.clone(),
+                        priority: form.priority,
+                    };
+                    self.actions.push(TuiAction::CreateReminder { new_reminder });
+                    self.create_form = None;
+                    self.current_view = AppView::Lists;
+                }
+            }
+            KeyCode::Char(c) => {
+                match form.current_field {
+                    0 => form.title.push(c),
+                    1 => form.notes.push(c),
+                    2 => form.due_date.push(c),
+                    _ => {}
+                }
+            }
+            // ... handle other keys
+        }
+    }
+}
+```
+
+### 5. Create Form UI Rendering
+
+```rust
+// In rust-core/src/tui/app.rs
+fn render_create_reminder(&mut self, f: &mut Frame) {
+    if let Some(ref form) = self.create_form {
+        // Create form layout with 5 fields
+        let form_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Title
+                Constraint::Length(5), // Notes
+                Constraint::Length(3), // Date
+                Constraint::Length(3), // List
+                Constraint::Length(3), // Priority
+            ])
+            .split(main_layout[0]);
+
+        // Render each field with highlighting for active field
+        let title_style = if form.current_field == 0 {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        
+        // Render title field, notes field, etc...
+    }
+}
+```
+
+### 6. Implement Swift EventKit Creation
+
+```swift
+// In RemTUIKit/Sources/RemTUIKit/RemindersService.swift
+public func createReminder(_ newReminder: NewReminder) async throws {
+    guard let calendar = eventStore.calendar(withIdentifier: newReminder.listId) else {
+        throw RemError.DataAccessError(message: "List not found")
+    }
+    
+    let reminder = EKReminder(eventStore: eventStore)
+    reminder.title = newReminder.title
+    reminder.notes = newReminder.notes
+    reminder.calendar = calendar
+    reminder.isCompleted = false
+    reminder.priority = Int(newReminder.priority)
+    
+    // Handle due date if provided
+    if let dueDateString = newReminder.dueDate, !dueDateString.isEmpty {
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: dueDateString) {
+            let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+            reminder.dueDateComponents = components
+        }
+    }
+    
+    try eventStore.save(reminder, commit: true)
+}
+```
+
+### 7. Process Create Actions in Main Loop
+
+```swift
+// In RemTUI/Sources/main.swift
+case .createReminder(let newReminder):
+    try await remindersService.createReminder(newReminder)
+    print("📝 Reminder created")
+```
+
+### Key Features of Create Implementation
+
+1. **Multi-field Form**: Five separate input fields with tab navigation
+2. **Form Validation**: Title field is required before submission
+3. **Field Highlighting**: Visual indication of currently active field
+4. **Complex Data Types**: Uses structured `NewReminder` type
+5. **Date Parsing**: Handles ISO8601 date format conversion
+6. **List Selection**: Dropdown-style list selection with ↑/↓ keys
+7. **Priority Setting**: Numeric priority selection (0-9)
+
+### Form Navigation Pattern
+
+The create form demonstrates a reusable pattern for multi-field forms:
+- Track current field with `current_field` index
+- Use Tab/Shift+Tab for navigation
+- Apply different styling to active field
+- Handle different input types per field
+- Validate before submission
+
+This pattern can be extended for editing existing reminders, creating lists, or other form-based operations.
 
 This guide should help you understand how to add new functionality to Rem through all layers of the architecture. Each change follows the same pattern: define in Rust, update UniFFI interface, rebuild bindings, implement Swift handling, and test thoroughly.
