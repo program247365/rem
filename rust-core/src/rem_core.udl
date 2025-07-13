@@ -1,0 +1,43 @@
+namespace rem_core {
+    [Throws=RemError]
+    sequence<TuiAction> start_tui(sequence<ReminderList> lists);
+    
+    [Throws=RemError]
+    sequence<TuiAction> render_reminders_view(sequence<Reminder> reminders);
+    
+    [Throws=RemError]
+    void set_reminders(sequence<Reminder> reminders);
+};
+
+dictionary ReminderList {
+    string id;
+    string name;
+    string color;
+    u32 count;
+};
+
+dictionary Reminder {
+    string id;
+    string title;
+    string? notes;
+    boolean completed;
+    u8 priority;
+    string? due_date;
+};
+
+[Enum]
+interface TuiAction {
+    Quit();
+    SelectList(string list_id);
+    ToggleReminder(string reminder_id);
+    DeleteReminder(string reminder_id);
+    Back();
+    Refresh();
+};
+
+[Error]
+interface RemError {
+    PermissionDenied();
+    DataAccessError(string message);
+    TUIError(string message);
+};

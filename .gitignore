@@ -1,2 +1,40 @@
-/target
+# Rust build artifacts
+rust-core/target/
+**/target/
+Cargo.lock
+
+# Swift build artifacts
+.build/
+**/Package.resolved
+**/.swiftpm/
+
+# UniFFI generated files
+RemTUIKit/Sources/RemTUIKit/rem_core.swift
+RemTUIKit/Sources/RemTUIKit/rem_coreFFI.h
+RemTUIKit/Sources/RemTUIKit/librem_core.dylib
+
+# macOS system files
+.DS_Store
+**/.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs and temporary files
 .data/*.log
+*.log
+*.tmp
+*.temp
+
+# Documentation builds
+**/doc/
+
+# Test artifacts
+coverage/
+**/coverage/

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSRemindersUsageDescription</key>
+    <string>Rem needs access to your reminders to display and manage them in the terminal interface.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Rem needs full access to your reminders to create, edit, and delete reminders through the terminal interface.</string>
+    <key>CFBundleIdentifier</key>
+    <string>sh.kbr.rem-tui</string>
+    <key>CFBundleName</key>
+    <string>RemTUI</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+</dict>
+</plist>
