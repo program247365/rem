@@ -115,6 +115,31 @@ public class RemindersService: ObservableObject {
         throw RemError.DataAccessError(message: "Reminder not found")
     }
     
+    public func createReminder(_ newReminder: NewReminder) async throws {
+        guard let calendar = eventStore.calendar(withIdentifier: newReminder.listId) else {
+            throw RemError.DataAccessError(message: "List not found")
+        }
+        
+        let reminder = EKReminder(eventStore: eventStore)
+        reminder.title = newReminder.title
+        reminder.notes = newReminder.notes
+        reminder.calendar = calendar
+        reminder.isCompleted = false
+        reminder.priority = Int(newReminder.priority)
+        
+        // Handle due date if provided
+        if let dueDateString = newReminder.dueDate, !dueDateString.isEmpty {
+            // Try to parse the date string (you might want to implement more sophisticated date parsing)
+            let formatter = ISO8601DateFormatter()
+            if let date = formatter.date(from: dueDateString) {
+                let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+                reminder.dueDateComponents = components
+            }
+        }
+        
+        try eventStore.save(reminder, commit: true)
+    }
+    
     private func getReminderCount(for calendar: EKCalendar) async throws -> Int {
         let predicate = eventStore.predicateForReminders(in: [calendar])
         

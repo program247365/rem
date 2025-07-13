@@ -25,12 +25,21 @@ dictionary Reminder {
     string? due_date;
 };
 
+dictionary NewReminder {
+    string title;
+    string? notes;
+    string? due_date;
+    string list_id;
+    u8 priority;
+};
+
 [Enum]
 interface TuiAction {
     Quit();
     SelectList(string list_id);
     ToggleReminder(string reminder_id);
     DeleteReminder(string reminder_id);
+    CreateReminder(NewReminder new_reminder);
     Back();
     Refresh();
 };

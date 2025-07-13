@@ -25,12 +25,40 @@ pub struct TUIApp {
     should_exit: bool,
     last_key: Option<KeyCode>,
     last_key_time: Option<Instant>,
+    create_form: Option<CreateReminderForm>,
 }
 
 #[derive(Clone, Debug)]
 enum AppView {
     Lists,
     Reminders { list_id: String },
+    CreateReminder,
+}
+
+#[derive(Clone, Debug)]
+struct CreateReminderForm {
+    title: String,
+    notes: String,
+    due_date: String,
+    selected_list_id: String,
+    priority: u8,
+    current_field: usize,
+}
+
+impl CreateReminderForm {
+    fn new(lists: &[ReminderList], default_list_id: Option<String>) -> Self {
+        let selected_list_id = default_list_id
+            .unwrap_or_else(|| lists.first().map(|l| l.id.clone()).unwrap_or_default());
+        
+        Self {
+            title: String::new(),
+            notes: String::new(),
+            due_date: String::new(),
+            selected_list_id,
+            priority: 0,
+            current_field: 0,
+        }
+    }
 }
 
 impl TUIApp {
@@ -50,6 +78,7 @@ impl TUIApp {
             should_exit: false,
             last_key: None,
             last_key_time: None,
+            create_form: None,
         })
     }
 
@@ -141,6 +170,7 @@ impl TUIApp {
         match &self.current_view {
             AppView::Lists => self.handle_lists_key_event(key),
             AppView::Reminders { list_id } => self.handle_reminders_key_event(key, list_id.clone()),
+            AppView::CreateReminder => self.handle_create_reminder_key_event(key),
         }
         
         // Update last key for sequence tracking with timing
@@ -179,6 +209,15 @@ impl TUIApp {
                     self.actions.push(TuiAction::SelectList { list_id: list.id.clone() });
                     self.current_view = AppView::Reminders { list_id: list.id.clone() };
                 }
+            }
+            KeyCode::Char('c') => {
+                let default_list_id = if !self.lists.is_empty() {
+                    Some(self.lists[self.selected_index].id.clone())
+                } else {
+                    None
+                };
+                self.create_form = Some(CreateReminderForm::new(&self.lists, default_list_id.clone()));
+                self.current_view = AppView::CreateReminder;
             }
             _ => {}
         }
@@ -237,7 +276,86 @@ impl TUIApp {
                     self.actions.push(TuiAction::DeleteReminder { reminder_id: reminder.id.clone() });
                 }
             }
+            KeyCode::Char('c') => {
+                self.create_form = Some(CreateReminderForm::new(&self.lists, Some(_list_id.clone())));
+                self.current_view = AppView::CreateReminder;
+            }
             _ => {}
+        }
+    }
+
+    fn handle_create_reminder_key_event(&mut self, key: crossterm::event::KeyEvent) {
+        if let Some(ref mut form) = self.create_form {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    self.actions.push(TuiAction::Back);
+                    self.current_view = AppView::Lists;
+                    self.create_form = None;
+                }
+                KeyCode::Tab => {
+                    form.current_field = (form.current_field + 1) % 5; // 5 fields: title, notes, date, list, priority
+                }
+                KeyCode::BackTab => {
+                    form.current_field = if form.current_field == 0 { 4 } else { form.current_field - 1 };
+                }
+                KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                    // Ctrl+S to save/submit
+                    if !form.title.trim().is_empty() {
+                        let new_reminder = crate::NewReminder {
+                            title: form.title.clone(),
+                            notes: if form.notes.trim().is_empty() { None } else { Some(form.notes.clone()) },
+                            due_date: if form.due_date.trim().is_empty() { None } else { Some(form.due_date.clone()) },
+                            list_id: form.selected_list_id.clone(),
+                            priority: form.priority,
+                        };
+                        self.actions.push(TuiAction::CreateReminder { new_reminder });
+                        self.create_form = None;
+                        self.current_view = AppView::Lists;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    match form.current_field {
+                        0 => form.title.push(c), // Title field
+                        1 => form.notes.push(c), // Notes field
+                        2 => form.due_date.push(c), // Date field
+                        _ => {}
+                    }
+                }
+                KeyCode::Backspace => {
+                    match form.current_field {
+                        0 => { form.title.pop(); }
+                        1 => { form.notes.pop(); }
+                        2 => { form.due_date.pop(); }
+                        _ => {}
+                    }
+                }
+                KeyCode::Up | KeyCode::Down => {
+                    match form.current_field {
+                        3 => { // List field
+                            if key.code == KeyCode::Up {
+                                if let Some(current_idx) = self.lists.iter().position(|l| l.id == form.selected_list_id) {
+                                    let new_idx = if current_idx == 0 { self.lists.len() - 1 } else { current_idx - 1 };
+                                    form.selected_list_id = self.lists[new_idx].id.clone();
+                                }
+                            } else {
+                                if let Some(current_idx) = self.lists.iter().position(|l| l.id == form.selected_list_id) {
+                                    let new_idx = (current_idx + 1) % self.lists.len();
+                                    form.selected_list_id = self.lists[new_idx].id.clone();
+                                }
+                            }
+                        }
+                        4 => { // Priority field
+                            if key.code == KeyCode::Up && form.priority < 9 {
+                                form.priority += 1;
+                            } else if key.code == KeyCode::Down && form.priority > 0 {
+                                form.priority -= 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -245,6 +363,7 @@ impl TUIApp {
         match &self.current_view {
             AppView::Lists => self.render_lists(f),
             AppView::Reminders { .. } => self.render_reminders(f),
+            AppView::CreateReminder => self.render_create_reminder(f),
         }
     }
 
@@ -397,6 +516,8 @@ impl TUIApp {
             Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
             Span::styled("⏎", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
             Span::styled(" select  ", Style::default().fg(Color::Gray)),
+            Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" create  ", Style::default().fg(Color::Gray)),
             Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
             Span::styled(" quit", Style::default().fg(Color::Gray)),
         ])])
@@ -557,6 +678,8 @@ impl TUIApp {
             Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
             Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
             Span::styled(" delete  ", Style::default().fg(Color::Gray)),
+            Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" create  ", Style::default().fg(Color::Gray)),
             Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
             Span::styled(" back", Style::default().fg(Color::Gray)),
         ])])
@@ -574,6 +697,146 @@ impl TUIApp {
         .alignment(Alignment::Center);
 
         f.render_widget(instructions, main_layout[1]);
+    }
+
+    fn render_create_reminder(&mut self, f: &mut Frame) {
+        let area = f.area();
+        
+        if let Some(ref form) = self.create_form {
+            let main_layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(3)])
+                .margin(2)
+                .split(area);
+
+            // Form fields layout
+            let form_layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3), // Title
+                    Constraint::Length(5), // Notes
+                    Constraint::Length(3), // Date
+                    Constraint::Length(3), // List
+                    Constraint::Length(3), // Priority
+                ])
+                .split(main_layout[0]);
+
+            // Title field
+            let title_style = if form.current_field == 0 {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            
+            let title_paragraph = Paragraph::new(if form.title.is_empty() { "New Reminder" } else { &form.title })
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .title(Span::styled(" Title ", title_style))
+                        .style(title_style)
+                );
+            f.render_widget(title_paragraph, form_layout[0]);
+
+            // Notes field
+            let notes_style = if form.current_field == 1 {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            
+            let notes_paragraph = Paragraph::new(if form.notes.is_empty() { "Add some notes..." } else { &form.notes })
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .title(Span::styled(" Notes ", notes_style))
+                        .style(notes_style)
+                )
+                .wrap(ratatui::widgets::Wrap { trim: true });
+            f.render_widget(notes_paragraph, form_layout[1]);
+
+            // Date field
+            let date_style = if form.current_field == 2 {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            
+            let date_paragraph = Paragraph::new(if form.due_date.is_empty() { "No Date" } else { &form.due_date })
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .title(Span::styled(" Date ", date_style))
+                        .style(date_style)
+                );
+            f.render_widget(date_paragraph, form_layout[2]);
+
+            // List field
+            let list_style = if form.current_field == 3 {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            
+            let selected_list_name = self.lists.iter()
+                .find(|l| l.id == form.selected_list_id)
+                .map(|l| l.name.as_str())
+                .unwrap_or("Unknown");
+                
+            let list_paragraph = Paragraph::new(selected_list_name)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .title(Span::styled(" List ", list_style))
+                        .style(list_style)
+                );
+            f.render_widget(list_paragraph, form_layout[3]);
+
+            // Priority field
+            let priority_style = if form.current_field == 4 {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            
+            let priority_text = if form.priority == 0 { "None".to_string() } else { form.priority.to_string() };
+            let priority_paragraph = Paragraph::new(priority_text)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .title(Span::styled(" Priority ", priority_style))
+                        .style(priority_style)
+                );
+            f.render_widget(priority_paragraph, form_layout[4]);
+
+            // Instructions
+            let instructions = Paragraph::new(vec![Line::from(vec![
+                Span::styled("Tab", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
+                Span::styled("Ctrl+S", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" create  ", Style::default().fg(Color::Gray)),
+                Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" cancel", Style::default().fg(Color::Gray)),
+            ])])
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " Controls ",
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Yellow))
+            )
+            .alignment(Alignment::Center);
+
+            f.render_widget(instructions, main_layout[1]);
+        }
     }
 }
 

@@ -383,6 +383,85 @@ fileprivate struct FfiConverterString: FfiConverter {
 }
 
 
+public struct NewReminder {
+    public var title: String
+    public var notes: String?
+    public var dueDate: String?
+    public var listId: String
+    public var priority: UInt8
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(title: String, notes: String?, dueDate: String?, listId: String, priority: UInt8) {
+        self.title = title
+        self.notes = notes
+        self.dueDate = dueDate
+        self.listId = listId
+        self.priority = priority
+    }
+}
+
+
+extension NewReminder: Equatable, Hashable {
+    public static func ==(lhs: NewReminder, rhs: NewReminder) -> Bool {
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.notes != rhs.notes {
+            return false
+        }
+        if lhs.dueDate != rhs.dueDate {
+            return false
+        }
+        if lhs.listId != rhs.listId {
+            return false
+        }
+        if lhs.priority != rhs.priority {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(title)
+        hasher.combine(notes)
+        hasher.combine(dueDate)
+        hasher.combine(listId)
+        hasher.combine(priority)
+    }
+}
+
+
+public struct FfiConverterTypeNewReminder: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NewReminder {
+        return try NewReminder(
+            title: FfiConverterString.read(from: &buf), 
+            notes: FfiConverterOptionString.read(from: &buf), 
+            dueDate: FfiConverterOptionString.read(from: &buf), 
+            listId: FfiConverterString.read(from: &buf), 
+            priority: FfiConverterUInt8.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NewReminder, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.notes, into: &buf)
+        FfiConverterOptionString.write(value.dueDate, into: &buf)
+        FfiConverterString.write(value.listId, into: &buf)
+        FfiConverterUInt8.write(value.priority, into: &buf)
+    }
+}
+
+
+public func FfiConverterTypeNewReminder_lift(_ buf: RustBuffer) throws -> NewReminder {
+    return try FfiConverterTypeNewReminder.lift(buf)
+}
+
+public func FfiConverterTypeNewReminder_lower(_ value: NewReminder) -> RustBuffer {
+    return FfiConverterTypeNewReminder.lower(value)
+}
+
+
 public struct Reminder {
     public var id: String
     public var title: String
@@ -613,6 +692,7 @@ public enum TuiAction {
     case selectList(listId: String)
     case toggleReminder(reminderId: String)
     case deleteReminder(reminderId: String)
+    case createReminder(newReminder: NewReminder)
     case back
     case refresh
 }
@@ -638,9 +718,13 @@ public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
             reminderId: try FfiConverterString.read(from: &buf)
         )
         
-        case 5: return .back
+        case 5: return .createReminder(
+            newReminder: try FfiConverterTypeNewReminder.read(from: &buf)
+        )
         
-        case 6: return .refresh
+        case 6: return .back
+        
+        case 7: return .refresh
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -669,12 +753,17 @@ public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
             FfiConverterString.write(reminderId, into: &buf)
             
         
-        case .back:
+        case let .createReminder(newReminder):
             writeInt(&buf, Int32(5))
+            FfiConverterTypeNewReminder.write(newReminder, into: &buf)
+            
+        
+        case .back:
+            writeInt(&buf, Int32(6))
         
         
         case .refresh:
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(7))
         
         }
     }

@@ -140,6 +140,10 @@ struct RemTUIApp {
                             try await remindersService.toggleReminder(reminderId)
                             print("✅ Reminder toggled")
                             
+                        case .createReminder(let newReminder):
+                            try await remindersService.createReminder(newReminder)
+                            print("📝 Reminder created")
+                            
                         case .back:
                             updatedListId = nil  // Going back to lists
                             
@@ -165,6 +169,14 @@ struct RemTUIApp {
             case .deleteReminder(_):
                 // This should no longer happen since deletes are handled in reminders view
                 break
+                
+            case .createReminder(let newReminder):
+                do {
+                    try await remindersService.createReminder(newReminder)
+                    print("📝 Reminder created")
+                } catch {
+                    print("❌ Error creating reminder: \(error)")
+                }
                 
             case .back:
                 // Going back to lists view

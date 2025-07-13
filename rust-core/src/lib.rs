@@ -26,12 +26,22 @@ pub struct Reminder {
     pub due_date: Option<String>,
 }
 
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct NewReminder {
+    pub title: String,
+    pub notes: Option<String>,
+    pub due_date: Option<String>,
+    pub list_id: String,
+    pub priority: u8,
+}
+
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum TuiAction {
     Quit,
     SelectList { list_id: String },
     ToggleReminder { reminder_id: String },
     DeleteReminder { reminder_id: String },
+    CreateReminder { new_reminder: NewReminder },
     Back,
     Refresh,
 }
