@@ -19,6 +19,7 @@ pub struct TUIApp {
     lists: Vec<ReminderList>,
     current_reminders: Vec<Reminder>,
     current_view: AppView,
+    previous_view: Option<AppView>,
     selected_index: usize,
     list_state: ListState,
     actions: Vec<TuiAction>,
@@ -26,10 +27,25 @@ pub struct TUIApp {
     last_key: Option<KeyCode>,
     last_key_time: Option<Instant>,
     create_form: Option<CreateReminderForm>,
+    status_log: Vec<String>,
+    is_loading: bool,
+    loading_message: String,
+    pending_operations: Vec<PendingOperation>,
+    loading_animation_state: usize,
+    last_animation_update: Option<Instant>,
+}
+
+#[derive(Clone, Debug)]
+enum PendingOperation {
+    LoadReminders { list_id: String },
+    ToggleReminder { reminder_id: String },
+    DeleteReminder { reminder_id: String },
+    CreateReminder { new_reminder: crate::NewReminder },
 }
 
 #[derive(Clone, Debug)]
 enum AppView {
+    Loading,
     Lists,
     Reminders { list_id: String },
     CreateReminder,
@@ -68,10 +84,13 @@ impl TUIApp {
             list_state.select(Some(0));
         }
 
+        let current_view = if lists.is_empty() { AppView::Loading } else { AppView::Lists };
+        
         Ok(Self {
             lists,
             current_reminders: Vec::new(),
-            current_view: AppView::Lists,
+            current_view,
+            previous_view: None,
             selected_index: 0,
             list_state,
             actions: Vec::new(),
@@ -79,6 +98,12 @@ impl TUIApp {
             last_key: None,
             last_key_time: None,
             create_form: None,
+            status_log: Vec::new(),
+            is_loading: false,
+            loading_message: String::new(),
+            pending_operations: Vec::new(),
+            loading_animation_state: 0,
+            last_animation_update: None,
         })
     }
 
@@ -88,14 +113,55 @@ impl TUIApp {
         self.list_state.select(if self.current_reminders.is_empty() { None } else { Some(0) });
     }
 
+    pub fn add_status_log(&mut self, message: String) {
+        self.status_log.push(message);
+        // Keep only last 5 messages to avoid UI clutter
+        if self.status_log.len() > 5 {
+            self.status_log.remove(0);
+        }
+    }
+
+    pub fn set_loading(&mut self, loading: bool, message: String) {
+        self.is_loading = loading;
+        if loading {
+            self.add_status_log(format!("⏳ {}", message));
+        }
+        self.loading_message = message;
+    }
+
+    pub fn set_lists(&mut self, lists: Vec<ReminderList>) {
+        self.lists = lists;
+        if !self.lists.is_empty() && matches!(self.current_view, AppView::Loading) {
+            self.current_view = AppView::Lists;
+            self.add_status_log("✅ Lists loaded successfully".to_string());
+        }
+    }
+
     pub fn run(&mut self) -> Result<Vec<TuiAction>, RemError> {
-        // Setup terminal
-        enable_raw_mode().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        // Setup terminal with better error handling
+        enable_raw_mode().map_err(|e| {
+            RemError::TUIError { 
+                message: format!("Failed to enable raw mode: {}. Try running in a different terminal.", e) 
+            }
+        })?;
+        
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
-            .map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        
+        // Try alternate screen and mouse capture with fallback
+        if let Err(e) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+            // Fallback: try without mouse capture
+            execute!(stdout, EnterAlternateScreen)
+                .map_err(|e2| RemError::TUIError { 
+                    message: format!("Terminal setup failed: {}. Original error: {}", e2, e) 
+                })?;
+        }
+        
         let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        let mut terminal = Terminal::new(backend).map_err(|e| {
+            RemError::TUIError { 
+                message: format!("Failed to create terminal: {}. Check terminal compatibility.", e) 
+            }
+        })?;
 
         let result = self.run_app(&mut terminal);
 
@@ -168,6 +234,13 @@ impl TUIApp {
 
     fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) {
         match &self.current_view {
+            AppView::Loading => {
+                // Only allow quit during loading
+                if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+                    self.actions.push(TuiAction::Quit);
+                    self.should_exit = true;
+                }
+            }
             AppView::Lists => self.handle_lists_key_event(key),
             AppView::Reminders { list_id } => self.handle_reminders_key_event(key, list_id.clone()),
             AppView::CreateReminder => self.handle_create_reminder_key_event(key),
@@ -206,8 +279,12 @@ impl TUIApp {
             }
             KeyCode::Enter => {
                 if let Some(list) = self.lists.get(self.selected_index) {
-                    self.actions.push(TuiAction::SelectList { list_id: list.id.clone() });
-                    self.current_view = AppView::Reminders { list_id: list.id.clone() };
+                    let list_id = list.id.clone();
+                    // Queue the operation and switch view immediately
+                    self.pending_operations.push(PendingOperation::LoadReminders { list_id: list_id.clone() });
+                    self.current_view = AppView::Reminders { list_id: list_id.clone() };
+                    self.add_status_log("📋 Loading reminders...".to_string());
+                    self.actions.push(TuiAction::SelectList { list_id });
                 }
             }
             KeyCode::Char('c') => {
@@ -216,6 +293,7 @@ impl TUIApp {
                 } else {
                     None
                 };
+                self.previous_view = Some(self.current_view.clone());
                 self.create_form = Some(CreateReminderForm::new(&self.lists, default_list_id.clone()));
                 self.current_view = AppView::CreateReminder;
             }
@@ -251,7 +329,10 @@ impl TUIApp {
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 if let Some(reminder) = self.current_reminders.get(self.selected_index) {
-                    self.actions.push(TuiAction::ToggleReminder { reminder_id: reminder.id.clone() });
+                    let reminder_id = reminder.id.clone();
+                    self.pending_operations.push(PendingOperation::ToggleReminder { reminder_id: reminder_id.clone() });
+                    self.add_status_log("✅ Toggling reminder...".to_string());
+                    self.actions.push(TuiAction::ToggleReminder { reminder_id });
                 }
             }
             KeyCode::Char('d') => {
@@ -277,6 +358,7 @@ impl TUIApp {
                 }
             }
             KeyCode::Char('c') => {
+                self.previous_view = Some(self.current_view.clone());
                 self.create_form = Some(CreateReminderForm::new(&self.lists, Some(_list_id.clone())));
                 self.current_view = AppView::CreateReminder;
             }
@@ -289,7 +371,8 @@ impl TUIApp {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => {
                     self.actions.push(TuiAction::Back);
-                    self.current_view = AppView::Lists;
+                    // Return to previous view or Lists as fallback
+                    self.current_view = self.previous_view.take().unwrap_or(AppView::Lists);
                     self.create_form = None;
                 }
                 KeyCode::Tab => {
@@ -310,7 +393,8 @@ impl TUIApp {
                         };
                         self.actions.push(TuiAction::CreateReminder { new_reminder });
                         self.create_form = None;
-                        self.current_view = AppView::Lists;
+                        // Return to previous view or Lists as fallback
+                        self.current_view = self.previous_view.take().unwrap_or(AppView::Lists);
                     }
                 }
                 KeyCode::Char(c) => {
@@ -361,10 +445,107 @@ impl TUIApp {
 
     fn ui(&mut self, f: &mut Frame) {
         match &self.current_view {
+            AppView::Loading => self.render_loading(f),
             AppView::Lists => self.render_lists(f),
             AppView::Reminders { .. } => self.render_reminders(f),
             AppView::CreateReminder => self.render_create_reminder(f),
         }
+    }
+
+    fn render_loading(&mut self, f: &mut Frame) {
+        // Update animation state every 150ms (similar to Claude Code timing)
+        let now = Instant::now();
+        if let Some(last_update) = self.last_animation_update {
+            if now.duration_since(last_update) >= Duration::from_millis(150) {
+                self.loading_animation_state = (self.loading_animation_state + 1) % 8;
+                self.last_animation_update = Some(now);
+            }
+        } else {
+            self.last_animation_update = Some(now);
+        }
+
+        // Claude Code style thinking animation sequence
+        let thinking_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+        let current_char = thinking_chars[self.loading_animation_state];
+        
+        let area = f.area();
+        
+        let main_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),     // Loading content
+                Constraint::Length(4),  // Controls
+                Constraint::Length(3)   // Status log
+            ])
+            .margin(1)
+            .split(area);
+
+        let loading_text = vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    current_char,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                ),
+                Span::styled(
+                    " Loading Apple Reminders...",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                ),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                &self.loading_message,
+                Style::default().fg(Color::Gray)
+            )),
+        ];
+
+        let paragraph = Paragraph::new(loading_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " 📝 Rem - Apple Reminders ",
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Blue))
+            )
+            .alignment(Alignment::Center);
+
+        f.render_widget(paragraph, main_layout[0]);
+
+        // Loading controls
+        let instructions = Paragraph::new(vec![Line::from(vec![
+            Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(" quit  ", Style::default().fg(Color::Gray)),
+            Span::styled("⏳", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(" loading...", Style::default().fg(Color::Gray)),
+        ])])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(Span::styled(
+                    " Controls ",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                ))
+                .title_alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Yellow))
+        )
+        .alignment(Alignment::Center);
+
+        f.render_widget(instructions, main_layout[1]);
+        
+        // Status log
+        self.render_status_log(f, main_layout[2]);
     }
 
     fn render_lists(&mut self, f: &mut Frame) {
@@ -409,7 +590,11 @@ impl TUIApp {
 
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(4)])
+            .constraints([
+                Constraint::Min(0),     // List content
+                Constraint::Length(4),  // Controls
+                Constraint::Length(3)   // Status log
+            ])
             .margin(1)
             .split(area);
 
@@ -535,6 +720,9 @@ impl TUIApp {
         .alignment(Alignment::Center);
 
         f.render_widget(instructions, main_layout[1]);
+        
+        // Status log
+        self.render_status_log(f, main_layout[2]);
     }
 
     fn render_reminders(&mut self, f: &mut Frame) {
@@ -579,7 +767,11 @@ impl TUIApp {
 
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(4)])
+            .constraints([
+                Constraint::Min(0),     // Reminders content
+                Constraint::Length(4),  // Controls
+                Constraint::Length(3)   // Status log
+            ])
             .margin(1)
             .split(area);
 
@@ -697,6 +889,9 @@ impl TUIApp {
         .alignment(Alignment::Center);
 
         f.render_widget(instructions, main_layout[1]);
+        
+        // Status log
+        self.render_status_log(f, main_layout[2]);
     }
 
     fn render_create_reminder(&mut self, f: &mut Frame) {
@@ -705,7 +900,11 @@ impl TUIApp {
         if let Some(ref form) = self.create_form {
             let main_layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(0), Constraint::Length(3)])
+                .constraints([
+                    Constraint::Min(0),     // Form content
+                    Constraint::Length(3),  // Controls
+                    Constraint::Length(3)   // Status log
+                ])
                 .margin(2)
                 .split(area);
 
@@ -836,7 +1035,58 @@ impl TUIApp {
             .alignment(Alignment::Center);
 
             f.render_widget(instructions, main_layout[1]);
+            
+            // Status log
+            self.render_status_log(f, main_layout[2]);
         }
+    }
+
+    fn render_status_log(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let log_lines: Vec<Line> = if self.status_log.is_empty() {
+            vec![Line::from(Span::styled(
+                "Ready",
+                Style::default().fg(Color::Green)
+            ))]
+        } else {
+            self.status_log.iter().map(|msg| {
+                // Add thinking animation to loading messages
+                if msg.contains("Loading") || msg.contains("⏳") {
+                    let thinking_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+                    let current_char = thinking_chars[self.loading_animation_state];
+                    Line::from(vec![
+                        Span::styled(
+                            current_char,
+                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                        ),
+                        Span::styled(
+                            format!(" {}", msg.replace("⏳ ", "")),
+                            Style::default().fg(Color::Cyan)
+                        )
+                    ])
+                } else {
+                    Line::from(Span::styled(
+                        msg,
+                        Style::default().fg(Color::Cyan)
+                    ))
+                }
+            }).collect()
+        };
+
+        let status_paragraph = Paragraph::new(log_lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        " Status ",
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Cyan))
+            )
+            .wrap(ratatui::widgets::Wrap { trim: true });
+
+        f.render_widget(status_paragraph, area);
     }
 }
 

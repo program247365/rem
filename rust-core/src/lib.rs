@@ -68,6 +68,7 @@ pub fn start_tui(lists: Vec<ReminderList>) -> Result<Vec<TuiAction>, RemError> {
     Ok(actions)
 }
 
+
 #[uniffi::export]
 pub fn render_reminders_view(reminders: Vec<Reminder>) -> Result<Vec<TuiAction>, RemError> {
     let mut global_tui = TUI_APP.lock().unwrap();

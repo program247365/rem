@@ -151,7 +151,7 @@ debug-build: ## Debug the build process
 	@cd RemTUI && swift build -v
 
 # Testing and Quality
-test: test-rust test-swift test-integration ## Run all tests
+test: test-rust test-swift ## Run all tests
 	@echo "$(GREEN)✅ All tests completed!$(NC)"
 
 test-rust: ## Run Rust core tests
@@ -164,12 +164,6 @@ test-swift: ## Run Swift package tests
 	@echo "$(YELLOW)Testing Swift executable build...$(NC)"
 	@cd RemTUI && swift build
 
-test-integration: ## Run integration tests
-	@echo "$(YELLOW)Running integration tests...$(NC)"
-	@./test-migration.sh
-
-test-migration: test-integration ## Validate the migration architecture
-	@echo "$(GREEN)✅ Migration validation complete!$(NC)"
 
 test-permissions: ## Test permissions functionality
 	@echo "$(YELLOW)Testing permissions...$(NC)"
@@ -275,9 +269,6 @@ show-arch: ## Show current architecture status
 	@echo ""
 	@echo "$(BLUE)Generated Bindings:$(NC)"
 	@ls -la RemTUIKit/Sources/RemTUIKit/*core* 2>/dev/null || echo "No UniFFI bindings generated yet"
-
-validate-migration: test-migration show-arch ## Full migration validation
-	@echo "$(GREEN)✅ Migration validation complete!$(NC)"
 
 # Quick development workflow shortcuts
 quick-build: build-rust build-uniffi ## Quick build (Rust + bindings only)

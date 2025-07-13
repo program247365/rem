@@ -18,7 +18,14 @@
       "Bash(rm:*)",
       "Bash(./fix-checksums.sh:*)",
       "Bash(swift test-delete:*)",
-      "Bash(swift:*)"
+      "Bash(swift:*)",
+      "Bash(grep:*)",
+      "Bash(timeout 10s swift run:*)",
+      "Bash(echo:*)",
+      "Bash(tty)",
+      "Bash(./build.sh)",
+      "Bash(.build/release/RemTUI)",
+      "Bash(nm:*)"
     ],
     "deny": []
   }
