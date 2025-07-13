@@ -13,7 +13,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct TUIApp {
     lists: Vec<ReminderList>,
@@ -24,6 +24,7 @@ pub struct TUIApp {
     actions: Vec<TuiAction>,
     should_exit: bool,
     last_key: Option<KeyCode>,
+    last_key_time: Option<Instant>,
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +49,7 @@ impl TUIApp {
             actions: Vec::new(),
             should_exit: false,
             last_key: None,
+            last_key_time: None,
         })
     }
 
@@ -141,8 +143,9 @@ impl TUIApp {
             AppView::Reminders { list_id } => self.handle_reminders_key_event(key, list_id.clone()),
         }
         
-        // Update last key for sequence tracking
+        // Update last key for sequence tracking with timing
         self.last_key = Some(key.code);
+        self.last_key_time = Some(Instant::now());
     }
 
     fn handle_lists_key_event(&mut self, key: crossterm::event::KeyEvent) {
@@ -214,12 +217,25 @@ impl TUIApp {
             }
             KeyCode::Char('d') => {
                 // Check if this is the second 'd' for 'dd' delete command
-                if let Some(KeyCode::Char('d')) = self.last_key {
+                let is_dd_sequence = if let (Some(KeyCode::Char('d')), Some(last_time)) = (self.last_key, self.last_key_time) {
+                    // Allow up to 1000ms between 'd' presses
+                    last_time.elapsed() < Duration::from_millis(1000)
+                } else {
+                    false
+                };
+
+                if is_dd_sequence {
                     if let Some(reminder) = self.current_reminders.get(self.selected_index) {
                         self.actions.push(TuiAction::DeleteReminder { reminder_id: reminder.id.clone() });
                     }
                 }
                 // Note: last_key will be updated after this function returns
+            }
+            KeyCode::Delete => {
+                // Alternative: Use Delete key for immediate deletion (no sequence needed)
+                if let Some(reminder) = self.current_reminders.get(self.selected_index) {
+                    self.actions.push(TuiAction::DeleteReminder { reminder_id: reminder.id.clone() });
+                }
             }
             _ => {}
         }
@@ -539,7 +555,7 @@ impl TUIApp {
             Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
             Span::styled("⏎/space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
             Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
-            Span::styled("dd", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
             Span::styled(" delete  ", Style::default().fg(Color::Gray)),
             Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
             Span::styled(" back", Style::default().fg(Color::Gray)),

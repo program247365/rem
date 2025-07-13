@@ -16,7 +16,9 @@
       "Bash(./.build/release/RemTUI:*)",
       "Bash(cp:*)",
       "Bash(rm:*)",
-      "Bash(./fix-checksums.sh:*)"
+      "Bash(./fix-checksums.sh:*)",
+      "Bash(swift test-delete:*)",
+      "Bash(swift:*)"
     ],
     "deny": []
   }

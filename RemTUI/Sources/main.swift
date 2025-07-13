@@ -75,6 +75,7 @@ struct RemTUIApp {
     
     private static func runTUILoop(lists: [ReminderList], remindersService: RemindersService) async {
         var currentLists = lists
+        var currentListId: String? = nil  // Track which list we're viewing
         
         while true {
             do {
@@ -82,14 +83,23 @@ struct RemTUIApp {
                 let actions = try startTui(lists: currentLists)
                 
                 // Process actions and check if we should continue
-                let shouldContinue = await processActions(actions, remindersService: remindersService, lists: currentLists)
+                let (shouldContinue, newListId) = await processActions(actions, remindersService: remindersService, lists: currentLists, currentListId: currentListId)
                 
                 if !shouldContinue {
                     break
                 }
                 
+                // Update current list ID if changed
+                currentListId = newListId
+                
                 // Refresh lists data for next iteration
                 currentLists = try await remindersService.fetchLists()
+                
+                // If we're viewing a specific list, refresh that view for next iteration
+                if let listId = currentListId {
+                    let refreshedReminders = try await remindersService.fetchReminders(for: listId)
+                    try setReminders(reminders: refreshedReminders)
+                }
                 
             } catch {
                 print("❌ Error in TUI: \(error)")
@@ -101,20 +111,45 @@ struct RemTUIApp {
     private static func processActions(
         _ actions: [TuiAction],
         remindersService: RemindersService,
-        lists: [ReminderList]
-    ) async -> Bool {
+        lists: [ReminderList],
+        currentListId: String?
+    ) async -> (shouldContinue: Bool, newListId: String?) {
+        var updatedListId = currentListId
+        
         for action in actions {
             switch action {
             case .quit:
                 print("👋 Goodbye!")
-                return false  // Exit the TUI loop
+                return (false, nil)  // Exit the TUI loop
                 
             case .selectList(let listId):
                 do {
                     print("📋 Loading reminders for selected list...")
                     let reminders = try await remindersService.fetchReminders(for: listId)
-                    let _ = try renderRemindersView(reminders: reminders)
-                    // TUI will restart and show the reminders view
+                    let reminderActions = try renderRemindersView(reminders: reminders)
+                    updatedListId = listId  // Track which list we're now viewing
+                    
+                    // Process actions from the reminders view
+                    for reminderAction in reminderActions {
+                        switch reminderAction {
+                        case .deleteReminder(let reminderId):
+                            try await remindersService.deleteReminder(reminderId)
+                            print("🗑️ Reminder deleted")
+                            
+                        case .toggleReminder(let reminderId):
+                            try await remindersService.toggleReminder(reminderId)
+                            print("✅ Reminder toggled")
+                            
+                        case .back:
+                            updatedListId = nil  // Going back to lists
+                            
+                        case .quit:
+                            return (false, nil)  // Exit completely
+                            
+                        default:
+                            break
+                        }
+                    }
                 } catch {
                     print("❌ Error loading reminders: \(error)")
                 }
@@ -127,23 +162,19 @@ struct RemTUIApp {
                     print("❌ Error toggling reminder: \(error)")
                 }
                 
-            case .deleteReminder(let reminderId):
-                do {
-                    try await remindersService.deleteReminder(reminderId)
-                    print("🗑️ Reminder deleted")
-                } catch {
-                    print("❌ Error deleting reminder: \(error)")
-                }
+            case .deleteReminder(_):
+                // This should no longer happen since deletes are handled in reminders view
+                break
                 
             case .back:
-                // TUI will restart and show the lists view
-                break
+                // Going back to lists view
+                updatedListId = nil
                 
             case .refresh:
                 // TUI will restart with refreshed data
                 break
             }
         }
-        return true  // Continue the TUI loop
+        return (true, updatedListId)  // Continue the TUI loop
     }
 }
