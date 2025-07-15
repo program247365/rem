@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build Release
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust-core/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Install UniFFI bindgen
+      run: cargo install uniffi-bindgen
+    
+    - name: Build release
+      run: make build
+    
+    - name: Create distribution package
+      run: |
+        mkdir -p dist
+        cp RemTUI/.build/release/RemTUI dist/rem-tui
+        cp rust-core/target/release/librem_core.dylib dist/
+        chmod +x dist/rem-tui
+    
+    - name: Create tarball
+      run: |
+        cd dist
+        tar -czf rem-tui-macos.tar.gz rem-tui librem_core.dylib
+        cd ..
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: rem-tui-release
+        path: dist/rem-tui-macos.tar.gz
+        retention-days: 90
+    
+    outputs:
+      tarball: dist/rem-tui-macos.tar.gz
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: rem-tui-release
+        path: dist/
+    
+    - name: Extract version from tag
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: Rem TUI ${{ steps.version.outputs.version }}
+        body: |
+          # Rem TUI ${{ steps.version.outputs.version }}
+          
+          A fast TUI (Terminal User Interface) for Apple Reminders built with Swift and Rust.
+          
+          ## Installation
+          
+          1. Download `rem-tui-macos.tar.gz`
+          2. Extract the archive: `tar -xzf rem-tui-macos.tar.gz`
+          3. Move the binary to your PATH: `mv rem-tui /usr/local/bin/`
+          4. Make sure the dylib is in the same directory or in your library path
+          
+          ## Requirements
+          
+          - macOS 14.0 or later
+          - Reminders app permissions (will be requested on first run)
+          
+          ## Usage
+          
+          ```bash
+          rem-tui
+          ```
+          
+          Navigate with vim-style keys (j/k for up/down, enter to select).
+          
+          ## What's New
+          
+          See the commit history for details about changes in this release.
+        files: |
+          dist/rem-tui-macos.tar.gz
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
