@@ -25,6 +25,37 @@ The release workflow supports two modes:
 5. Enter version (e.g., `v1.0.0`)
 6. Click **Run workflow**
 
+## macOS App Signing
+
+### Security Warning Issue
+Downloaded apps may show a security warning: "rem-tui cannot be opened because it is from an unidentified developer."
+
+### Solution: Configure App Signing
+To eliminate security warnings, add these secrets to your GitHub repository:
+
+1. **Get Apple Developer Certificate**:
+   - Enroll in Apple Developer Program ($99/year)
+   - Create a Developer ID Application certificate
+   - Export as .p12 file with password
+
+2. **Add Repository Secrets**:
+   Go to **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+   
+   - `APPLE_CERTIFICATE_P12_BASE64`: Base64 encoded .p12 file
+     ```bash
+     base64 -i YourCertificate.p12 | pbcopy
+     ```
+   - `APPLE_CERTIFICATE_PASSWORD`: Password for .p12 file
+   - `APPLE_SIGNING_IDENTITY`: Certificate name (e.g., "Developer ID Application: Your Name")
+   - `KEYCHAIN_PASSWORD`: Any secure password for temporary keychain
+
+3. **Without Signing**: Users can bypass security warning:
+   - Right-click app → "Open" → "Open" (bypasses Gatekeeper)
+   - Or run: `xattr -dr com.apple.quarantine rem-tui`
+
+### Dynamic Library Path Fix
+The release workflow automatically fixes dylib paths to work on user machines.
+
 ## GitHub Token Permissions Issue
 
 ### Problem
@@ -83,8 +114,29 @@ Each release includes:
 
 1. Download `rem-tui-macos.tar.gz` from the release page
 2. Extract: `tar -xzf rem-tui-macos.tar.gz`
-3. Move to PATH: `mv rem-tui /usr/local/bin/`
-4. Ensure dylib is accessible (same directory or in library path)
+3. **Important**: Keep both files together:
+   ```bash
+   # Create installation directory
+   mkdir -p /usr/local/bin/rem-tui-bundle
+   
+   # Copy both files
+   cp rem-tui /usr/local/bin/rem-tui-bundle/
+   cp librem_core.dylib /usr/local/bin/rem-tui-bundle/
+   
+   # Create symlink in PATH
+   ln -sf /usr/local/bin/rem-tui-bundle/rem-tui /usr/local/bin/rem-tui
+   ```
+4. Run: `rem-tui`
+
+### Troubleshooting Installation
+
+**If you get "dyld: Library not loaded" error**:
+- Ensure both `rem-tui` and `librem_core.dylib` are in the same directory
+- The dylib path is automatically fixed in releases, but they must stay together
+
+**If you get security warning**:
+- Right-click → "Open" → "Open" (bypasses Gatekeeper)
+- Or run: `xattr -dr com.apple.quarantine rem-tui`
 
 ## Requirements
 

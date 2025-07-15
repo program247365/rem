@@ -345,6 +345,9 @@ ci-create-distribution-package: ## CI: Create distribution package
 	@cp RemTUI/.build/release/RemTUI dist/rem-tui
 	@cp rust-core/target/release/librem_core.dylib dist/
 	@chmod +x dist/rem-tui
+	@echo "Fixing dylib path..."
+	@install_name_tool -change /Users/runner/work/rem/rem/rust-core/target/release/librem_core.dylib @executable_path/librem_core.dylib dist/rem-tui || true
+	@install_name_tool -change rust-core/target/release/librem_core.dylib @executable_path/librem_core.dylib dist/rem-tui || true
 
 ci-create-tarball: ## CI: Create tarball
 	@cd dist && tar -czf rem-tui-macos.tar.gz rem-tui librem_core.dylib
