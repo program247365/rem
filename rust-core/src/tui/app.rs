@@ -30,19 +30,11 @@ pub struct TUIApp {
     status_log: Vec<String>,
     is_loading: bool,
     loading_message: String,
-    pending_operations: Vec<PendingOperation>,
     loading_animation_state: usize,
     last_animation_update: Option<Instant>,
     show_completed_todos: bool,
 }
 
-#[derive(Clone, Debug)]
-enum PendingOperation {
-    LoadReminders { list_id: String },
-    ToggleReminder { reminder_id: String },
-    DeleteReminder { reminder_id: String },
-    CreateReminder { new_reminder: crate::NewReminder },
-}
 
 #[derive(Clone, Debug)]
 enum AppView {
@@ -102,7 +94,6 @@ impl TUIApp {
             status_log: Vec::new(),
             is_loading: false,
             loading_message: String::new(),
-            pending_operations: Vec::new(),
             loading_animation_state: 0,
             last_animation_update: None,
             show_completed_todos: false,
@@ -317,8 +308,7 @@ impl TUIApp {
             KeyCode::Enter => {
                 if let Some(list) = self.lists.get(self.selected_index) {
                     let list_id = list.id.clone();
-                    // Queue the operation and switch view immediately
-                    self.pending_operations.push(PendingOperation::LoadReminders { list_id: list_id.clone() });
+                    // Switch view immediately
                     self.current_view = AppView::Reminders { list_id: list_id.clone() };
                     self.add_status_log("📋 Loading reminders...".to_string());
                     self.actions.push(TuiAction::SelectList { list_id });
@@ -377,7 +367,6 @@ impl TUIApp {
                 let filtered_reminders = self.get_filtered_reminders();
                 if let Some(reminder) = filtered_reminders.get(self.selected_index) {
                     let reminder_id = reminder.id.clone();
-                    self.pending_operations.push(PendingOperation::ToggleReminder { reminder_id: reminder_id.clone() });
                     self.add_status_log("✅ Toggling reminder...".to_string());
                     self.actions.push(TuiAction::ToggleReminder { reminder_id });
                 }
