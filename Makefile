@@ -300,3 +300,51 @@ fresh-start: clean-all setup build test ## Complete fresh development setup
 
 ci: check test ## Run CI pipeline (checks + tests)
 	@echo "$(GREEN)✅ CI pipeline complete!$(NC)"
+
+# CI-specific targets (used by GitHub Actions)
+ci-check-rust-formatting: ## CI: Check Rust formatting
+	@cd rust-core && cargo fmt --check
+
+ci-run-rust-linter: ## CI: Run Rust linter
+	@cd rust-core && cargo clippy --all-targets --all-features -- -D warnings
+
+ci-build-uniffi-bindgen: ## CI: Build UniFFI bindgen
+	@cd rust-core && cargo build --release --bin uniffi-bindgen
+
+ci-build-rust-core: ## CI: Build Rust core
+	@make build-rust
+
+ci-generate-uniffi-bindings: ## CI: Generate UniFFI bindings
+	@make build-uniffi
+
+ci-build-swift-package: ## CI: Build Swift package
+	@cd RemTUIKit && swift build -c release
+
+ci-build-swift-executable: ## CI: Build Swift executable
+	@cd RemTUI && swift build -c release
+
+ci-build-for-testing: ## CI: Build for testing
+	@make build
+
+ci-run-rust-tests: ## CI: Run Rust tests
+	@make test-rust
+
+ci-run-swift-tests: ## CI: Run Swift tests
+	@make test-swift
+
+ci-check-code-quality: ## CI: Check code quality
+	@make check-rust
+	@make build-uniffi
+	@make check-swift
+
+ci-build-release: ## CI: Build release
+	@make build
+
+ci-create-distribution-package: ## CI: Create distribution package
+	@mkdir -p dist
+	@cp RemTUI/.build/release/RemTUI dist/rem-tui
+	@cp rust-core/target/release/librem_core.dylib dist/
+	@chmod +x dist/rem-tui
+
+ci-create-tarball: ## CI: Create tarball
+	@cd dist && tar -czf rem-tui-macos.tar.gz rem-tui librem_core.dylib

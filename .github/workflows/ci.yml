@@ -1,63 +1,119 @@
-name: CI # Continuous Integration
+name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
+  build:
+    name: Build macOS
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust-core/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Check Rust formatting
+      run: make ci-check-rust-formatting
+    
+    - name: Run Rust linter
+      run: make ci-run-rust-linter
+    
+    - name: Build UniFFI bindgen
+      run: make ci-build-uniffi-bindgen
+    
+    - name: Build Rust core
+      run: make ci-build-rust-core
+    
+    - name: Generate UniFFI bindings
+      run: make ci-generate-uniffi-bindings
+    
+    - name: Build Swift package
+      run: make ci-build-swift-package
+    
+    - name: Build Swift executable
+      run: make ci-build-swift-executable
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: rem-tui-macos
+        path: |
+          RemTUI/.build/release/RemTUI
+          rust-core/target/release/librem_core.dylib
+        retention-days: 7
 
   test:
-    name: Test Suite
-    runs-on: ubuntu-latest
+    name: Test macOS
+    runs-on: macos-latest
+    needs: build
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-      - name: Run tests
-        run: cargo test --locked --all-features --workspace
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust-core/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build UniFFI bindgen
+      run: make ci-build-uniffi-bindgen
+    
+    - name: Build for testing
+      run: make ci-build-for-testing
+    
+    - name: Run Rust tests
+      run: make ci-run-rust-tests
+    
+    - name: Run Swift tests
+      run: make ci-run-swift-tests
 
-  rustfmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
+  quality:
+    name: Code Quality
+    runs-on: macos-latest
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Clippy check
-        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
-
-  docs:
-    name: Docs
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-      - name: Check documentation
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --document-private-items --all-features --workspace --examples
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust-core/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build UniFFI bindgen
+      run: make ci-build-uniffi-bindgen
+    
+    - name: Check code quality
+      run: make ci-check-code-quality

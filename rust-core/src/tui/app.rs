@@ -1,4 +1,4 @@
-use crate::{ReminderList, Reminder, TuiAction, RemError};
+use crate::{RemError, Reminder, ReminderList, TuiAction};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -9,12 +9,12 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Padding},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph},
     Frame, Terminal,
 };
 use std::io;
-use std::time::{Duration, Instant};
 use std::thread;
+use std::time::{Duration, Instant};
 
 pub struct TUIApp {
     lists: Vec<ReminderList>,
@@ -42,7 +42,7 @@ pub struct TUIApp {
 struct SearchState {
     is_active: bool,
     query: String,
-    is_global: bool, // true = search all lists, false = search current list
+    is_global: bool,   // true = search all lists, false = search current list
     has_results: bool, // track if we have filtered results to show
     last_escape_time: Option<Instant>, // for double-escape behavior
 }
@@ -57,7 +57,7 @@ impl SearchState {
             last_escape_time: None,
         }
     }
-    
+
     fn start_search(&mut self, is_global: bool) {
         self.is_active = true;
         self.is_global = is_global;
@@ -65,26 +65,26 @@ impl SearchState {
         self.has_results = false;
         self.last_escape_time = None;
     }
-    
+
     fn add_char(&mut self, c: char) {
         if self.is_active {
             self.query.push(c);
             self.has_results = !self.query.is_empty();
         }
     }
-    
+
     fn remove_char(&mut self) {
         if self.is_active && !self.query.is_empty() {
             self.query.pop();
             self.has_results = !self.query.is_empty();
         }
     }
-    
+
     fn exit_search(&mut self) {
         self.is_active = false;
         // Keep has_results to maintain filtering
     }
-    
+
     fn clear_search(&mut self) {
         self.is_active = false;
         self.query.clear();
@@ -93,7 +93,6 @@ impl SearchState {
         self.last_escape_time = None;
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub enum AppView {
@@ -117,7 +116,7 @@ impl CreateReminderForm {
     fn new(lists: &[ReminderList], default_list_id: Option<String>) -> Self {
         let selected_list_id = default_list_id
             .unwrap_or_else(|| lists.first().map(|l| l.id.clone()).unwrap_or_default());
-        
+
         Self {
             title: String::new(),
             notes: String::new(),
@@ -136,8 +135,12 @@ impl TUIApp {
             list_state.select(Some(0));
         }
 
-        let current_view = if lists.is_empty() { AppView::Loading } else { AppView::Lists };
-        
+        let current_view = if lists.is_empty() {
+            AppView::Loading
+        } else {
+            AppView::Lists
+        };
+
         Ok(Self {
             lists,
             current_reminders: Vec::new(),
@@ -163,46 +166,69 @@ impl TUIApp {
 
     pub fn set_reminders(&mut self, reminders: Vec<Reminder>) {
         self.current_reminders = reminders.clone();
-        
+
         // Transition from loading to reminders view
         if matches!(self.current_view, AppView::Loading) {
             // Determine the appropriate view based on the current context
             if self.search_state.is_global {
-                self.current_view = AppView::Reminders { list_id: "global".to_string() };
+                self.current_view = AppView::Reminders {
+                    list_id: "global".to_string(),
+                };
             } else {
                 // For regular list selection, use a generic identifier
-                self.current_view = AppView::Reminders { list_id: "selected".to_string() };
+                self.current_view = AppView::Reminders {
+                    list_id: "selected".to_string(),
+                };
             }
             self.is_loading = false;
             self.add_status_log("✅ Data loaded successfully".to_string());
         }
-        
+
         // If we're in global search mode, also populate all_reminders for filtering
         if self.search_state.is_global || self.is_in_global_search_view() {
             // For global search, create all_reminders with a placeholder list name
             // This will be populated correctly when we have proper list names
-            self.all_reminders = reminders.into_iter().map(|r| (r, "Unknown List".to_string())).collect();
+            self.all_reminders = reminders
+                .into_iter()
+                .map(|r| (r, "Unknown List".to_string()))
+                .collect();
         }
-        
+
         self.selected_index = 0;
-        self.list_state.select(if self.current_reminders.is_empty() { None } else { Some(0) });
+        self.list_state
+            .select(if self.current_reminders.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
     }
-    
-    pub fn set_reminders_with_global_data(&mut self, reminders: Vec<Reminder>, all_reminders: Vec<(Reminder, String)>) {
+
+    pub fn set_reminders_with_global_data(
+        &mut self,
+        reminders: Vec<Reminder>,
+        all_reminders: Vec<(Reminder, String)>,
+    ) {
         self.current_reminders = reminders;
         self.all_reminders = all_reminders;
-        
+
         // Transition from loading to global reminders view
         if matches!(self.current_view, AppView::Loading) {
-            self.current_view = AppView::Reminders { list_id: "global".to_string() };
+            self.current_view = AppView::Reminders {
+                list_id: "global".to_string(),
+            };
             self.is_loading = false;
             self.add_status_log("✅ Global search data loaded successfully".to_string());
         }
-        
+
         self.selected_index = 0;
-        self.list_state.select(if self.current_reminders.is_empty() { None } else { Some(0) });
+        self.list_state
+            .select(if self.current_reminders.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
     }
-    
+
     pub fn set_all_reminders(&mut self, all_reminders: Vec<(Reminder, String)>) {
         self.all_reminders = all_reminders;
     }
@@ -218,7 +244,7 @@ impl TUIApp {
     pub fn set_loading(&mut self, loading: bool, message: String) {
         self.is_loading = loading;
         if loading {
-            self.add_status_log(format!("⏳ {}", message));
+            self.add_status_log(format!("⏳ {message}"));
         }
         self.loading_message = message;
     }
@@ -251,29 +277,39 @@ impl TUIApp {
             if self.show_completed_todos {
                 self.all_reminders.iter().map(|(r, _)| r).collect()
             } else {
-                self.all_reminders.iter().map(|(r, _)| r).filter(|r| !r.completed).collect()
+                self.all_reminders
+                    .iter()
+                    .map(|(r, _)| r)
+                    .filter(|r| !r.completed)
+                    .collect()
             }
         } else {
             // Use current_reminders for list-specific view
             if self.show_completed_todos {
                 self.current_reminders.iter().collect()
             } else {
-                self.current_reminders.iter().filter(|r| !r.completed).collect()
+                self.current_reminders
+                    .iter()
+                    .filter(|r| !r.completed)
+                    .collect()
             }
         };
-        
+
         let mut reminders = base_reminders;
-        
+
         // Apply search filter if active
         if self.search_state.has_results && !self.search_state.query.is_empty() {
             let query = self.search_state.query.to_lowercase();
             reminders.retain(|reminder| {
                 // Search in title and notes
-                reminder.title.to_lowercase().contains(&query) ||
-                reminder.notes.as_ref().map_or(false, |notes| notes.to_lowercase().contains(&query))
+                reminder.title.to_lowercase().contains(&query)
+                    || reminder
+                        .notes
+                        .as_ref()
+                        .is_some_and(|notes| notes.to_lowercase().contains(&query))
             });
         }
-        
+
         reminders
     }
 
@@ -356,41 +392,44 @@ impl TUIApp {
 
     pub fn run(&mut self) -> Result<Vec<TuiAction>, RemError> {
         // Setup terminal with better error handling
-        enable_raw_mode().map_err(|e| {
-            RemError::TUIError { 
-                message: format!("Failed to enable raw mode: {}. Try running in a different terminal.", e) 
-            }
+        enable_raw_mode().map_err(|e| RemError::TUIError {
+            message: format!(
+                "Failed to enable raw mode: {e}. Try running in a different terminal."
+            ),
         })?;
-        
+
         let mut stdout = io::stdout();
-        
+
         // Try alternate screen and mouse capture with fallback
         if let Err(e) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
             // Fallback: try without mouse capture
-            execute!(stdout, EnterAlternateScreen)
-                .map_err(|e2| RemError::TUIError { 
-                    message: format!("Terminal setup failed: {}. Original error: {}", e2, e) 
-                })?;
+            execute!(stdout, EnterAlternateScreen).map_err(|e2| RemError::TUIError {
+                message: format!("Terminal setup failed: {e2}. Original error: {e}"),
+            })?;
         }
-        
+
         let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend).map_err(|e| {
-            RemError::TUIError { 
-                message: format!("Failed to create terminal: {}. Check terminal compatibility.", e) 
-            }
+        let mut terminal = Terminal::new(backend).map_err(|e| RemError::TUIError {
+            message: format!("Failed to create terminal: {e}. Check terminal compatibility."),
         })?;
 
         let result = self.run_app(&mut terminal);
 
         // Restore terminal
-        disable_raw_mode().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        disable_raw_mode().map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
         execute!(
             terminal.backend_mut(),
             LeaveAlternateScreen,
             DisableMouseCapture
         )
-        .map_err(|e| RemError::TUIError { message: e.to_string() })?;
-        terminal.show_cursor().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        .map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
+        terminal.show_cursor().map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
 
         result
     }
@@ -399,111 +438,142 @@ impl TUIApp {
         // This method continues the TUI from where it left off
         // It's used when Swift has processed actions and wants to continue the TUI loop
         self.actions.clear();
-        
+
         loop {
             // Check if terminal is still available
             if self.should_exit {
                 break;
             }
-            
+
             // For continue_running, we need to handle the display differently
             // The TUI continues from its current state
-            if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
-                if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
+            if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError {
+                message: e.to_string(),
+            })? {
+                if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError {
+                    message: e.to_string(),
+                })? {
                     if key.kind == KeyEventKind::Press {
                         self.handle_key_event(key);
                     }
                 }
             }
-            
+
             if !self.actions.is_empty() {
                 break;
             }
         }
-        
+
         Ok(self.actions.clone())
     }
 
     pub fn run_persistent(&mut self) -> Result<Vec<TuiAction>, RemError> {
         // Setup terminal with better error handling
-        enable_raw_mode().map_err(|e| {
-            RemError::TUIError { 
-                message: format!("Failed to enable raw mode: {}. Try running in a different terminal.", e) 
-            }
+        enable_raw_mode().map_err(|e| RemError::TUIError {
+            message: format!(
+                "Failed to enable raw mode: {e}. Try running in a different terminal."
+            ),
         })?;
-        
+
         let mut stdout = io::stdout();
-        
+
         // Try alternate screen and mouse capture with fallback
         if let Err(e) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
             // Fallback: try without mouse capture
-            execute!(stdout, EnterAlternateScreen)
-                .map_err(|e2| RemError::TUIError { 
-                    message: format!("Terminal setup failed: {}. Original error: {}", e2, e) 
-                })?;
+            execute!(stdout, EnterAlternateScreen).map_err(|e2| RemError::TUIError {
+                message: format!("Terminal setup failed: {e2}. Original error: {e}"),
+            })?;
         }
-        
+
         let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend).map_err(|e| {
-            RemError::TUIError { 
-                message: format!("Failed to create terminal: {}. Check terminal compatibility.", e) 
-            }
+        let mut terminal = Terminal::new(backend).map_err(|e| RemError::TUIError {
+            message: format!("Failed to create terminal: {e}. Check terminal compatibility."),
         })?;
-        
+
         let result = self.run_persistent_app(&mut terminal);
-        
+
         // Restore terminal
-        disable_raw_mode().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        disable_raw_mode().map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
         execute!(
             terminal.backend_mut(),
             LeaveAlternateScreen,
             DisableMouseCapture
         )
-        .map_err(|e| RemError::TUIError { message: e.to_string() })?;
-        terminal.show_cursor().map_err(|e| RemError::TUIError { message: e.to_string() })?;
-        
+        .map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
+        terminal.show_cursor().map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
+
         result
     }
 
     pub fn run_reminders_view(&mut self) -> Result<Vec<TuiAction>, RemError> {
         // For reminders view, just handle the reminders display
         // This is called when we're already in the TUI and switching to reminders
-        
+
         // Setup terminal
-        enable_raw_mode().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        enable_raw_mode().map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
-            .map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture).map_err(|e| {
+            RemError::TUIError {
+                message: e.to_string(),
+            }
+        })?;
         let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        let mut terminal = Terminal::new(backend).map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
 
         let result = self.run_app(&mut terminal);
 
         // Restore terminal
-        disable_raw_mode().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        disable_raw_mode().map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
         execute!(
             terminal.backend_mut(),
             LeaveAlternateScreen,
             DisableMouseCapture
         )
-        .map_err(|e| RemError::TUIError { message: e.to_string() })?;
-        terminal.show_cursor().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        .map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
+        terminal.show_cursor().map_err(|e| RemError::TUIError {
+            message: e.to_string(),
+        })?;
 
         result
     }
 
-    fn run_app<B: ratatui::backend::Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<Vec<TuiAction>, RemError> {
+    fn run_app<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> Result<Vec<TuiAction>, RemError> {
         self.actions.clear();
-        
+
         loop {
-            terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+            terminal
+                .draw(|f| self.ui(f))
+                .map_err(|e| RemError::TUIError {
+                    message: e.to_string(),
+                })?;
 
             if self.should_exit {
                 break;
             }
 
-            if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
-                if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
+            if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError {
+                message: e.to_string(),
+            })? {
+                if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError {
+                    message: e.to_string(),
+                })? {
                     if key.kind == KeyEventKind::Press {
                         self.handle_key_event(key);
                     }
@@ -518,100 +588,144 @@ impl TUIApp {
         Ok(self.actions.clone())
     }
 
-    fn run_persistent_app<B: ratatui::backend::Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<Vec<TuiAction>, RemError> {
+    fn run_persistent_app<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> Result<Vec<TuiAction>, RemError> {
         // This is the main persistent loop that should never exit except on quit
         loop {
             self.actions.clear();
-            
+
             // Inner loop for handling user input and displaying UI
             loop {
-                terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
-                
+                terminal
+                    .draw(|f| self.ui(f))
+                    .map_err(|e| RemError::TUIError {
+                        message: e.to_string(),
+                    })?;
+
                 if self.should_exit {
                     return Ok(vec![TuiAction::Quit]);
                 }
-                
-                if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
-                    if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
+
+                if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError {
+                    message: e.to_string(),
+                })? {
+                    if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError {
+                        message: e.to_string(),
+                    })? {
                         if key.kind == KeyEventKind::Press {
                             self.handle_key_event(key);
                         }
                     }
                 }
-                
+
                 // If we have actions, process them
                 if !self.actions.is_empty() {
                     break;
                 }
             }
-            
+
             // Check if we should exit the entire TUI
             if self.actions.iter().any(|a| matches!(a, TuiAction::Quit)) {
                 break;
             }
-            
+
             // Check if we should show a loading state and wait for data
-            if self.actions.iter().any(|a| matches!(a, TuiAction::SelectList { .. } | TuiAction::GlobalSearch { .. } | TuiAction::Refresh)) {
+            if self.actions.iter().any(|a| {
+                matches!(
+                    a,
+                    TuiAction::SelectList { .. }
+                        | TuiAction::GlobalSearch { .. }
+                        | TuiAction::Refresh
+                )
+            }) {
                 // Show the loading screen for at least a few frames so user sees it
                 let mut frames_shown = 0;
-                while frames_shown < 5 {  // Show loading for at least 5 frames (~250ms)
-                    terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+                while frames_shown < 5 {
+                    // Show loading for at least 5 frames (~250ms)
+                    terminal
+                        .draw(|f| self.ui(f))
+                        .map_err(|e| RemError::TUIError {
+                            message: e.to_string(),
+                        })?;
                     frames_shown += 1;
                     thread::sleep(Duration::from_millis(50));
                 }
-                
+
                 // Continue showing loading screen until data is loaded
                 // This keeps the TUI visible while Swift processes the action
                 while matches!(self.current_view, AppView::Loading) {
-                    terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+                    terminal
+                        .draw(|f| self.ui(f))
+                        .map_err(|e| RemError::TUIError {
+                            message: e.to_string(),
+                        })?;
                     thread::sleep(Duration::from_millis(50));
-                    
+
                     // Check if we should exit while waiting
-                    if event::poll(Duration::from_millis(10)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
-                        if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
-                            if key.kind == KeyEventKind::Press && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+                    if event::poll(Duration::from_millis(10)).map_err(|e| RemError::TUIError {
+                        message: e.to_string(),
+                    })? {
+                        if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError {
+                            message: e.to_string(),
+                        })? {
+                            if key.kind == KeyEventKind::Press
+                                && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+                            {
                                 self.should_exit = true;
                                 return Ok(vec![TuiAction::Quit]);
                             }
                         }
                     }
                 }
-                
+
                 // Data has been loaded, continue the loop
                 continue;
             }
-            
+
             // For other actions (like toggleReminder, deleteReminder), just continue
             // The TUI stays running
         }
-        
+
         Ok(self.actions.clone())
     }
 
-    pub fn run_persistent_iteration<B: ratatui::backend::Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<Vec<TuiAction>, RemError> {
+    pub fn run_persistent_iteration<B: ratatui::backend::Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+    ) -> Result<Vec<TuiAction>, RemError> {
         self.actions.clear();
-        
+
         // Handle the display and input for one iteration
         loop {
-            terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
-            
+            terminal
+                .draw(|f| self.ui(f))
+                .map_err(|e| RemError::TUIError {
+                    message: e.to_string(),
+                })?;
+
             if self.should_exit {
                 return Ok(vec![TuiAction::Quit]);
             }
-            
-            if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
-                if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
+
+            if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError {
+                message: e.to_string(),
+            })? {
+                if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError {
+                    message: e.to_string(),
+                })? {
                     if key.kind == KeyEventKind::Press {
                         self.handle_key_event(key);
                     }
                 }
             }
-            
+
             // If we have actions to process, return them to Swift
             if !self.actions.is_empty() {
                 break;
             }
-            
+
             // Update loading animation if in loading state
             if matches!(self.current_view, AppView::Loading) && self.is_loading {
                 if let Some(last_update) = self.last_animation_update {
@@ -624,7 +738,7 @@ impl TUIApp {
                 }
             }
         }
-        
+
         Ok(self.actions.clone())
     }
 
@@ -634,7 +748,7 @@ impl TUIApp {
             self.handle_search_key_event(key);
             return;
         }
-        
+
         // Special handling for global search view when search is not active
         if self.is_in_global_search_view() && !self.search_state.is_active {
             match key.code {
@@ -655,7 +769,7 @@ impl TUIApp {
                 }
             }
         }
-        
+
         // Handle search activation
         if key.code == KeyCode::Char('/') {
             match &self.current_view {
@@ -666,9 +780,11 @@ impl TUIApp {
                     self.current_view = AppView::Loading;
                     self.search_state.start_search(true); // Global search from lists
                     self.add_status_log("🔍 Loading global search...".to_string());
-                    
+
                     // Trigger loading of all reminders
-                    self.actions.push(TuiAction::GlobalSearch { query: "".to_string() });
+                    self.actions.push(TuiAction::GlobalSearch {
+                        query: "".to_string(),
+                    });
                     return;
                 }
                 AppView::Reminders { .. } => {
@@ -679,7 +795,7 @@ impl TUIApp {
                 _ => {}
             }
         }
-        
+
         // Handle normal view logic
         match &self.current_view {
             AppView::Loading => {
@@ -693,7 +809,7 @@ impl TUIApp {
             AppView::Reminders { list_id } => self.handle_reminders_key_event(key, list_id.clone()),
             AppView::CreateReminder => self.handle_create_reminder_key_event(key),
         }
-        
+
         // Update last key for sequence tracking with timing
         self.last_key = Some(key.code);
         self.last_key_time = Some(Instant::now());
@@ -708,7 +824,7 @@ impl TUIApp {
                     if now.duration_since(last_escape) < Duration::from_millis(1000) {
                         self.search_state.clear_search();
                         self.reset_selection_for_filtered_reminders();
-                        
+
                         // For global search, go back to Lists view
                         if self.is_in_global_search_view() {
                             self.current_view = AppView::Lists;
@@ -723,7 +839,7 @@ impl TUIApp {
                 // Single escape = exit search mode but keep results
                 self.search_state.exit_search();
                 self.search_state.last_escape_time = Some(now);
-                
+
                 // For global search, first escape goes back to Lists view
                 if self.is_in_global_search_view() {
                     self.current_view = AppView::Lists;
@@ -748,7 +864,7 @@ impl TUIApp {
                 self.search_state.exit_search();
                 let query = &self.search_state.query;
                 if !query.is_empty() {
-                    self.add_status_log(format!("🔍 Search for '{}' applied", query));
+                    self.add_status_log(format!("🔍 Search for '{query}' applied"));
                 } else {
                     self.search_state.clear_search();
                     self.add_status_log("🔍 Search cleared".to_string());
@@ -764,10 +880,14 @@ impl TUIApp {
     fn update_search_results(&mut self) {
         let query = &self.search_state.query;
         self.search_state.has_results = !query.is_empty();
-        
+
         if !query.is_empty() {
-            let search_type = if self.search_state.is_global { "global" } else { "list" };
-            self.add_status_log(format!("🔍 {} search: '{}'", search_type, query));
+            let search_type = if self.search_state.is_global {
+                "global"
+            } else {
+                "list"
+            };
+            self.add_status_log(format!("🔍 {search_type} search: '{query}'"));
         }
     }
 
@@ -801,13 +921,13 @@ impl TUIApp {
                 if let Some(list) = self.lists.get(self.selected_index) {
                     let list_id = list.id.clone();
                     let list_name = list.name.clone();
-                    
+
                     // Show loading screen immediately before any network call
                     self.is_loading = true;
-                    self.loading_message = format!("Loading {} reminders...", list_name);
+                    self.loading_message = format!("Loading {list_name} reminders...");
                     self.current_view = AppView::Loading;
-                    self.add_status_log(format!("📋 Loading {} reminders...", list_name));
-                    
+                    self.add_status_log(format!("📋 Loading {list_name} reminders..."));
+
                     // Push action for Swift to handle
                     self.actions.push(TuiAction::SelectList { list_id });
                 }
@@ -819,13 +939,20 @@ impl TUIApp {
                     None
                 };
                 self.previous_view = Some(self.current_view.clone());
-                self.create_form = Some(CreateReminderForm::new(&self.lists, default_list_id.clone()));
+                self.create_form = Some(CreateReminderForm::new(
+                    &self.lists,
+                    default_list_id.clone(),
+                ));
                 self.current_view = AppView::CreateReminder;
             }
             KeyCode::Char('h') => {
                 self.show_completed_todos = !self.show_completed_todos;
-                let status = if self.show_completed_todos { "shown" } else { "hidden" };
-                self.add_status_log(format!("👁️ Completed todos {}", status));
+                let status = if self.show_completed_todos {
+                    "shown"
+                } else {
+                    "hidden"
+                };
+                self.add_status_log(format!("👁️ Completed todos {status}"));
                 // Note: We don't push the action here as this is for lists view
                 // The action would cause the app to exit this view
             }
@@ -876,7 +1003,9 @@ impl TUIApp {
             }
             KeyCode::Char('d') => {
                 // Check if this is the second 'd' for 'dd' delete command
-                let is_dd_sequence = if let (Some(KeyCode::Char('d')), Some(last_time)) = (self.last_key, self.last_key_time) {
+                let is_dd_sequence = if let (Some(KeyCode::Char('d')), Some(last_time)) =
+                    (self.last_key, self.last_key_time)
+                {
                     // Allow up to 1000ms between 'd' presses
                     last_time.elapsed() < Duration::from_millis(1000)
                 } else {
@@ -886,7 +1015,9 @@ impl TUIApp {
                 if is_dd_sequence {
                     let filtered_reminders = self.get_filtered_reminders();
                     if let Some(reminder) = filtered_reminders.get(self.selected_index) {
-                        self.actions.push(TuiAction::DeleteReminder { reminder_id: reminder.id.clone() });
+                        self.actions.push(TuiAction::DeleteReminder {
+                            reminder_id: reminder.id.clone(),
+                        });
                     }
                 }
                 // Note: last_key will be updated after this function returns
@@ -895,18 +1026,25 @@ impl TUIApp {
                 // Alternative: Use Delete key for immediate deletion (no sequence needed)
                 let filtered_reminders = self.get_filtered_reminders();
                 if let Some(reminder) = filtered_reminders.get(self.selected_index) {
-                    self.actions.push(TuiAction::DeleteReminder { reminder_id: reminder.id.clone() });
+                    self.actions.push(TuiAction::DeleteReminder {
+                        reminder_id: reminder.id.clone(),
+                    });
                 }
             }
             KeyCode::Char('c') => {
                 self.previous_view = Some(self.current_view.clone());
-                self.create_form = Some(CreateReminderForm::new(&self.lists, Some(list_id.clone())));
+                self.create_form =
+                    Some(CreateReminderForm::new(&self.lists, Some(list_id.clone())));
                 self.current_view = AppView::CreateReminder;
             }
             KeyCode::Char('h') => {
                 self.show_completed_todos = !self.show_completed_todos;
-                let status = if self.show_completed_todos { "shown" } else { "hidden" };
-                self.add_status_log(format!("👁️ Completed todos {}", status));
+                let status = if self.show_completed_todos {
+                    "shown"
+                } else {
+                    "hidden"
+                };
+                self.add_status_log(format!("👁️ Completed todos {status}"));
                 // Reset selection to ensure we stay within filtered bounds
                 self.reset_selection_for_filtered_reminders();
                 // Don't push action - handle entirely within TUI for immediate re-render
@@ -928,19 +1066,36 @@ impl TUIApp {
                     form.current_field = (form.current_field + 1) % 5; // 5 fields: title, notes, date, list, priority
                 }
                 KeyCode::BackTab => {
-                    form.current_field = if form.current_field == 0 { 4 } else { form.current_field - 1 };
+                    form.current_field = if form.current_field == 0 {
+                        4
+                    } else {
+                        form.current_field - 1
+                    };
                 }
-                KeyCode::Char('s') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                KeyCode::Char('s')
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
                     // Ctrl+S to save/submit
                     if !form.title.trim().is_empty() {
                         let new_reminder = crate::NewReminder {
                             title: form.title.clone(),
-                            notes: if form.notes.trim().is_empty() { None } else { Some(form.notes.clone()) },
-                            due_date: if form.due_date.trim().is_empty() { None } else { Some(form.due_date.clone()) },
+                            notes: if form.notes.trim().is_empty() {
+                                None
+                            } else {
+                                Some(form.notes.clone())
+                            },
+                            due_date: if form.due_date.trim().is_empty() {
+                                None
+                            } else {
+                                Some(form.due_date.clone())
+                            },
                             list_id: form.selected_list_id.clone(),
                             priority: form.priority,
                         };
-                        self.actions.push(TuiAction::CreateReminder { new_reminder });
+                        self.actions
+                            .push(TuiAction::CreateReminder { new_reminder });
                         self.create_form = None;
                         // Return to previous view or Lists as fallback
                         self.current_view = self.previous_view.take().unwrap_or(AppView::Lists);
@@ -948,36 +1103,52 @@ impl TUIApp {
                 }
                 KeyCode::Char(c) => {
                     match form.current_field {
-                        0 => form.title.push(c), // Title field
-                        1 => form.notes.push(c), // Notes field
+                        0 => form.title.push(c),    // Title field
+                        1 => form.notes.push(c),    // Notes field
                         2 => form.due_date.push(c), // Date field
                         _ => {}
                     }
                 }
-                KeyCode::Backspace => {
-                    match form.current_field {
-                        0 => { form.title.pop(); }
-                        1 => { form.notes.pop(); }
-                        2 => { form.due_date.pop(); }
-                        _ => {}
+                KeyCode::Backspace => match form.current_field {
+                    0 => {
+                        form.title.pop();
                     }
-                }
+                    1 => {
+                        form.notes.pop();
+                    }
+                    2 => {
+                        form.due_date.pop();
+                    }
+                    _ => {}
+                },
                 KeyCode::Up | KeyCode::Down => {
                     match form.current_field {
-                        3 => { // List field
+                        3 => {
+                            // List field
                             if key.code == KeyCode::Up {
-                                if let Some(current_idx) = self.lists.iter().position(|l| l.id == form.selected_list_id) {
-                                    let new_idx = if current_idx == 0 { self.lists.len() - 1 } else { current_idx - 1 };
+                                if let Some(current_idx) = self
+                                    .lists
+                                    .iter()
+                                    .position(|l| l.id == form.selected_list_id)
+                                {
+                                    let new_idx = if current_idx == 0 {
+                                        self.lists.len() - 1
+                                    } else {
+                                        current_idx - 1
+                                    };
                                     form.selected_list_id = self.lists[new_idx].id.clone();
                                 }
-                            } else {
-                                if let Some(current_idx) = self.lists.iter().position(|l| l.id == form.selected_list_id) {
-                                    let new_idx = (current_idx + 1) % self.lists.len();
-                                    form.selected_list_id = self.lists[new_idx].id.clone();
-                                }
+                            } else if let Some(current_idx) = self
+                                .lists
+                                .iter()
+                                .position(|l| l.id == form.selected_list_id)
+                            {
+                                let new_idx = (current_idx + 1) % self.lists.len();
+                                form.selected_list_id = self.lists[new_idx].id.clone();
                             }
                         }
-                        4 => { // Priority field
+                        4 => {
+                            // Priority field
                             if key.code == KeyCode::Up && form.priority < 9 {
                                 form.priority += 1;
                             } else if key.code == KeyCode::Down && form.priority > 0 {
@@ -1016,15 +1187,15 @@ impl TUIApp {
         // Claude Code style thinking animation sequence
         let thinking_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
         let current_char = thinking_chars[self.loading_animation_state];
-        
+
         let area = f.area();
-        
+
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(0),     // Loading content
-                Constraint::Length(4),  // Controls
-                Constraint::Length(3)   // Status log
+                Constraint::Min(0),    // Loading content
+                Constraint::Length(4), // Controls
+                Constraint::Length(3), // Status log
             ])
             .margin(1)
             .split(area);
@@ -1032,77 +1203,69 @@ impl TUIApp {
         // Create gradient-like effect with different colors
         let dots = "•".repeat((self.loading_animation_state % 4) + 1);
         let padding = " ".repeat(3 - (self.loading_animation_state % 4));
-        
+
         let loading_text = vec![
             Line::from(""),
             Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "      ╭─────────────────────────────────────────╮",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "      ╭─────────────────────────────────────────╮",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )]),
             Line::from(vec![
                 Span::styled(
                     "      │              ",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "🍎 Rem TUI",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "              │",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
-            Line::from(vec![
-                Span::styled(
-                    "      ╰─────────────────────────────────────────╯",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "      ╰─────────────────────────────────────────╯",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
             Line::from(vec![
-                Span::styled(
-                    "             ",
-                    Style::default()
-                ),
+                Span::styled("             ", Style::default()),
                 Span::styled(
                     current_char,
                     Style::default()
                         .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    " ",
-                    Style::default()
-                ),
+                Span::styled(" ", Style::default()),
                 Span::styled(
                     &self.loading_message,
                     Style::default()
                         .fg(Color::White)
-                        .add_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     &dots,
                     Style::default()
                         .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    &padding,
-                    Style::default()
-                ),
+                Span::styled(&padding, Style::default()),
             ]),
             Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "          🔄 Connecting to Apple Reminders",
-                    Style::default()
-                        .fg(Color::Gray)
-                ),
-            ]),
+            Line::from(vec![Span::styled(
+                "          🔄 Connecting to Apple Reminders",
+                Style::default().fg(Color::Gray),
+            )]),
             Line::from(""),
         ];
 
@@ -1115,10 +1278,10 @@ impl TUIApp {
                         " 📝 Rem - Apple Reminders ",
                         Style::default()
                             .fg(Color::Blue)
-                            .add_modifier(Modifier::BOLD)
+                            .add_modifier(Modifier::BOLD),
                     ))
                     .title_alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::Blue))
+                    .style(Style::default().fg(Color::Blue)),
             )
             .alignment(Alignment::Center);
 
@@ -1126,9 +1289,20 @@ impl TUIApp {
 
         // Loading controls
         let instructions = Paragraph::new(vec![Line::from(vec![
-            Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+            Span::styled(
+                "q",
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD)
+                    .bg(Color::DarkGray),
+            ),
             Span::styled(" quit  ", Style::default().fg(Color::Gray)),
-            Span::styled("⏳", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "⏳",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" loading...", Style::default().fg(Color::Gray)),
         ])])
         .block(
@@ -1137,22 +1311,24 @@ impl TUIApp {
                 .border_type(BorderType::Rounded)
                 .title(Span::styled(
                     " Controls ",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
                 .title_alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Yellow))
+                .style(Style::default().fg(Color::Yellow)),
         )
         .alignment(Alignment::Center);
 
         f.render_widget(instructions, main_layout[1]);
-        
+
         // Status log
         self.render_status_log(f, main_layout[2]);
     }
 
     fn render_lists(&mut self, f: &mut Frame) {
         let area = f.area();
-        
+
         if self.lists.is_empty() {
             let empty_text = vec![
                 Line::from(""),
@@ -1161,12 +1337,12 @@ impl TUIApp {
                     "📭 No reminder lists found",
                     Style::default()
                         .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
                     "Check your Apple Reminders app",
-                    Style::default().fg(Color::Gray)
+                    Style::default().fg(Color::Gray),
                 )),
             ];
 
@@ -1179,10 +1355,10 @@ impl TUIApp {
                             " 📝 Rem - Apple Reminders ",
                             Style::default()
                                 .fg(Color::Blue)
-                                .add_modifier(Modifier::BOLD)
+                                .add_modifier(Modifier::BOLD),
                         ))
                         .title_alignment(Alignment::Center)
-                        .style(Style::default().fg(Color::Blue))
+                        .style(Style::default().fg(Color::Blue)),
                 )
                 .alignment(Alignment::Center);
 
@@ -1193,9 +1369,9 @@ impl TUIApp {
         let main_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(0),     // List content
-                Constraint::Length(4),  // Controls
-                Constraint::Length(3)   // Status log
+                Constraint::Min(0),    // List content
+                Constraint::Length(4), // Controls
+                Constraint::Length(3), // Status log
             ])
             .margin(1)
             .split(area);
@@ -1208,7 +1384,7 @@ impl TUIApp {
             .map(|(i, list)| {
                 let is_selected = i == self.selected_index;
                 let color = parse_color(&list.color);
-                
+
                 let count_text = if list.count == 0 {
                     "Empty".to_string()
                 } else if list.count == 1 {
@@ -1221,24 +1397,25 @@ impl TUIApp {
                     Line::from(vec![
                         Span::styled(
                             if is_selected { "▶ " } else { "  " },
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-                        ),
-                        Span::styled(
-                            "●",
                             Style::default()
-                                .fg(color)
-                                .add_modifier(Modifier::BOLD)
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
                         ),
+                        Span::styled("●", Style::default().fg(color).add_modifier(Modifier::BOLD)),
                         Span::raw("  "),
                         Span::styled(
                             &list.name,
                             Style::default()
-                                .fg(if is_selected { Color::White } else { Color::LightBlue })
-                                .add_modifier(if is_selected { 
-                                    Modifier::BOLD | Modifier::UNDERLINED 
-                                } else { 
-                                    Modifier::BOLD 
+                                .fg(if is_selected {
+                                    Color::White
+                                } else {
+                                    Color::LightBlue
                                 })
+                                .add_modifier(if is_selected {
+                                    Modifier::BOLD | Modifier::UNDERLINED
+                                } else {
+                                    Modifier::BOLD
+                                }),
                         ),
                     ]),
                     Line::from(vec![
@@ -1247,11 +1424,9 @@ impl TUIApp {
                             count_text,
                             Style::default().fg(if list.count == 0 {
                                 Color::DarkGray
-                            } else if is_selected {
-                                Color::Gray
                             } else {
                                 Color::Gray
-                            })
+                            }),
                         ),
                     ]),
                 ];
@@ -1261,9 +1436,7 @@ impl TUIApp {
                 }
 
                 let style = if is_selected {
-                    Style::default()
-                        .bg(Color::DarkGray)
-                        .fg(Color::White)
+                    Style::default().bg(Color::DarkGray).fg(Color::White)
                 } else {
                     Style::default()
                 };
@@ -1281,38 +1454,78 @@ impl TUIApp {
                         " 📝 Your Reminder Lists ",
                         Style::default()
                             .fg(Color::Blue)
-                            .add_modifier(Modifier::BOLD)
+                            .add_modifier(Modifier::BOLD),
                     ))
                     .title_alignment(Alignment::Center)
                     .style(Style::default().fg(Color::Blue))
-                    .padding(Padding::horizontal(1))
+                    .padding(Padding::horizontal(1)),
             )
             .highlight_style(
                 Style::default()
                     .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             );
 
         f.render_stateful_widget(list_widget, main_layout[0], &mut self.list_state);
 
         // Instructions
-        let visibility_text = if self.show_completed_todos { "hide completed" } else { "show completed" };
-        let visibility_display = format!(" {}  ", visibility_text);
+        let visibility_text = if self.show_completed_todos {
+            "hide completed"
+        } else {
+            "show completed"
+        };
+        let visibility_display = format!(" {visibility_text}  ");
         let instructions = Paragraph::new(vec![
             Line::from(vec![
-                Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "↑↓",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(" or ", Style::default().fg(Color::Gray)),
-                Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "j/k",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
-                Span::styled("⏎", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "⏎",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(" select  ", Style::default().fg(Color::Gray)),
-                Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "c",
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(" create", Style::default().fg(Color::Gray)),
             ]),
             Line::from(vec![
-                Span::styled("h", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "h",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(visibility_display, Style::default().fg(Color::Gray)),
-                Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "q",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(" quit", Style::default().fg(Color::Gray)),
             ]),
         ])
@@ -1322,31 +1535,34 @@ impl TUIApp {
                 .border_type(BorderType::Rounded)
                 .title(Span::styled(
                     " Controls ",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
                 .title_alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Yellow))
+                .style(Style::default().fg(Color::Yellow)),
         )
         .alignment(Alignment::Center);
 
         f.render_widget(instructions, main_layout[1]);
-        
+
         // Status log
         self.render_status_log(f, main_layout[2]);
     }
 
     fn render_reminders(&mut self, f: &mut Frame) {
         let area = f.area();
-        
-        let filtered_reminders: Vec<Reminder> = self.get_filtered_reminders().into_iter().cloned().collect();
-        
+
+        let filtered_reminders: Vec<Reminder> =
+            self.get_filtered_reminders().into_iter().cloned().collect();
+
         if filtered_reminders.is_empty() {
             let message = if self.current_reminders.is_empty() {
                 "📭 No reminders in this list"
             } else {
                 "📭 No incomplete reminders (press 'h' to show completed)"
             };
-            
+
             let empty_text = vec![
                 Line::from(""),
                 Line::from(""),
@@ -1354,12 +1570,12 @@ impl TUIApp {
                     message,
                     Style::default()
                         .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
                     "Press 'q' to go back",
-                    Style::default().fg(Color::Gray)
+                    Style::default().fg(Color::Gray),
                 )),
             ];
 
@@ -1369,13 +1585,17 @@ impl TUIApp {
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
                         .title(Span::styled(
-                            if self.is_in_global_search_view() { " 🔍 Global Search " } else { " 📝 Reminders " },
+                            if self.is_in_global_search_view() {
+                                " 🔍 Global Search "
+                            } else {
+                                " 📝 Reminders "
+                            },
                             Style::default()
                                 .fg(Color::Blue)
-                                .add_modifier(Modifier::BOLD)
+                                .add_modifier(Modifier::BOLD),
                         ))
                         .title_alignment(Alignment::Center)
-                        .style(Style::default().fg(Color::Blue))
+                        .style(Style::default().fg(Color::Blue)),
                 )
                 .alignment(Alignment::Center);
 
@@ -1387,10 +1607,10 @@ impl TUIApp {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(3),  // Search bar
-                    Constraint::Min(0),     // Reminders content
-                    Constraint::Length(4),  // Controls
-                    Constraint::Length(3)   // Status log
+                    Constraint::Length(3), // Search bar
+                    Constraint::Min(0),    // Reminders content
+                    Constraint::Length(4), // Controls
+                    Constraint::Length(3), // Status log
                 ])
                 .margin(1)
                 .split(area)
@@ -1398,9 +1618,9 @@ impl TUIApp {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(0),     // Reminders content
-                    Constraint::Length(4),  // Controls
-                    Constraint::Length(3)   // Status log
+                    Constraint::Min(0),    // Reminders content
+                    Constraint::Length(4), // Controls
+                    Constraint::Length(3), // Status log
                 ])
                 .margin(1)
                 .split(area)
@@ -1420,26 +1640,40 @@ impl TUIApp {
             .enumerate()
             .map(|(i, reminder)| {
                 let is_selected = i == self.selected_index;
-                
+
                 let checkbox = if reminder.completed { "☑" } else { "☐" };
                 let title_color = if reminder.completed {
-                    if is_selected { Color::LightBlue } else { Color::Gray }
+                    if is_selected {
+                        Color::LightBlue
+                    } else {
+                        Color::Gray
+                    }
                 } else {
-                    if is_selected { Color::White } else { Color::White }
+                    Color::White
                 };
-                let title_modifier = if reminder.completed { Modifier::CROSSED_OUT } else { Modifier::empty() };
+                let title_modifier = if reminder.completed {
+                    Modifier::CROSSED_OUT
+                } else {
+                    Modifier::empty()
+                };
 
                 // Build the title line with optional list name for global search
                 let mut title_spans = vec![
                     Span::styled(
                         if is_selected { "▶ " } else { "  " },
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         checkbox,
                         Style::default()
-                            .fg(if reminder.completed { Color::Green } else { Color::Gray })
-                            .add_modifier(Modifier::BOLD)
+                            .fg(if reminder.completed {
+                                Color::Green
+                            } else {
+                                Color::Gray
+                            })
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw("  "),
                 ];
@@ -1448,19 +1682,24 @@ impl TUIApp {
                 if self.is_in_global_search_view() {
                     if let Some(list_name) = self.get_list_name_for_reminder(&reminder.id) {
                         title_spans.push(Span::styled(
-                            format!("[{}] ",list_name),
+                            format!("[{list_name}] "),
                             Style::default()
                                 .fg(Color::LightBlue)
-                                .add_modifier(Modifier::BOLD)
+                                .add_modifier(Modifier::BOLD),
                         ));
                     }
                 }
 
                 title_spans.push(Span::styled(
                     &reminder.title,
-                    Style::default()
-                        .fg(title_color)
-                        .add_modifier(title_modifier | if is_selected { Modifier::UNDERLINED } else { Modifier::empty() })
+                    Style::default().fg(title_color).add_modifier(
+                        title_modifier
+                            | if is_selected {
+                                Modifier::UNDERLINED
+                            } else {
+                                Modifier::empty()
+                            },
+                    ),
                 ));
 
                 let mut lines = vec![Line::from(title_spans)];
@@ -1469,10 +1708,7 @@ impl TUIApp {
                     if !notes.is_empty() {
                         lines.push(Line::from(vec![
                             Span::raw("      "),
-                            Span::styled(
-                                notes,
-                                Style::default().fg(Color::DarkGray)
-                            ),
+                            Span::styled(notes, Style::default().fg(Color::DarkGray)),
                         ]));
                     }
                 }
@@ -1482,9 +1718,7 @@ impl TUIApp {
                 }
 
                 let style = if is_selected {
-                    Style::default()
-                        .bg(Color::DarkGray)
-                        .fg(Color::White)
+                    Style::default().bg(Color::DarkGray).fg(Color::White)
                 } else {
                     Style::default()
                 };
@@ -1499,79 +1733,187 @@ impl TUIApp {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(Span::styled(
-                        if self.is_in_global_search_view() { " 🔍 Global Search " } else { " 📝 Reminders " },
+                        if self.is_in_global_search_view() {
+                            " 🔍 Global Search "
+                        } else {
+                            " 📝 Reminders "
+                        },
                         Style::default()
                             .fg(Color::Blue)
-                            .add_modifier(Modifier::BOLD)
+                            .add_modifier(Modifier::BOLD),
                     ))
                     .title_alignment(Alignment::Center)
                     .style(Style::default().fg(Color::Blue))
-                    .padding(Padding::horizontal(1))
+                    .padding(Padding::horizontal(1)),
             )
             .highlight_style(
                 Style::default()
                     .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             );
 
-        f.render_stateful_widget(list_widget, main_layout[content_index], &mut self.list_state);
+        f.render_stateful_widget(
+            list_widget,
+            main_layout[content_index],
+            &mut self.list_state,
+        );
 
         // Instructions
-        let visibility_text = if self.show_completed_todos { "hide completed" } else { "show completed" };
-        let visibility_display = format!(" {}  ", visibility_text);
-        
+        let visibility_text = if self.show_completed_todos {
+            "hide completed"
+        } else {
+            "show completed"
+        };
+        let visibility_display = format!(" {visibility_text}  ");
+
         // Different instructions for global search
         let instructions = if self.is_in_global_search_view() {
             let mut lines = vec![
                 Line::from(vec![
-                    Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "↑↓",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" or ", Style::default().fg(Color::Gray)),
-                    Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "j/k",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
-                    Span::styled("⏎/space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "⏎/space",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
-                    Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "dd/Del",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" delete", Style::default().fg(Color::Gray)),
                 ]),
                 Line::from(vec![
-                    Span::styled("h", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "h",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(visibility_display, Style::default().fg(Color::Gray)),
-                    Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "Esc",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" or ", Style::default().fg(Color::Gray)),
-                    Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "q",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" back to lists", Style::default().fg(Color::Gray)),
                 ]),
             ];
-            
+
             // Add search instructions if search is active
             if self.search_state.is_active {
                 lines.push(Line::from(vec![
-                    Span::styled("Type", Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "Type",
+                        Style::default()
+                            .fg(Color::LightBlue)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" to search  ", Style::default().fg(Color::Gray)),
-                    Span::styled("Backspace", Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "Backspace",
+                        Style::default()
+                            .fg(Color::LightBlue)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" to delete", Style::default().fg(Color::Gray)),
                 ]));
             }
-            
+
             Paragraph::new(lines)
         } else {
             Paragraph::new(vec![
                 Line::from(vec![
-                    Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "↑↓",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" or ", Style::default().fg(Color::Gray)),
-                    Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "j/k",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
-                    Span::styled("⏎/space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "⏎/space",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
-                    Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "dd/Del",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" delete", Style::default().fg(Color::Gray)),
                 ]),
                 Line::from(vec![
-                    Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "c",
+                        Style::default()
+                            .fg(Color::Magenta)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" create  ", Style::default().fg(Color::Gray)),
-                    Span::styled("h", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "h",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(visibility_display, Style::default().fg(Color::Gray)),
-                    Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(
+                        "q",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(Color::DarkGray),
+                    ),
                     Span::styled(" back", Style::default().fg(Color::Gray)),
                 ]),
             ])
@@ -1582,29 +1924,35 @@ impl TUIApp {
                 .border_type(BorderType::Rounded)
                 .title(Span::styled(
                     " Controls ",
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
                 .title_alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Yellow))
+                .style(Style::default().fg(Color::Yellow)),
         )
         .alignment(Alignment::Center);
 
         f.render_widget(instructions, main_layout[content_index + 1]);
-        
+
         // Status log
         self.render_status_log(f, main_layout[content_index + 2]);
     }
 
     fn render_search_bar(&self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let search_type = if self.search_state.is_global { "Global" } else { "List" };
-        let title = format!(" 🔍 {} Search ", search_type);
-        
+        let search_type = if self.search_state.is_global {
+            "Global"
+        } else {
+            "List"
+        };
+        let title = format!(" 🔍 {search_type} Search ");
+
         let search_text = if self.search_state.is_active {
             format!("{}_", self.search_state.query) // Show cursor with underscore
         } else {
             self.search_state.query.clone()
         };
-        
+
         let placeholder = if search_text.is_empty() && !self.search_state.is_active {
             if self.search_state.is_global {
                 "Press '/' to search all reminders..."
@@ -1614,13 +1962,13 @@ impl TUIApp {
         } else {
             ""
         };
-        
+
         let display_text = if !placeholder.is_empty() {
             placeholder
         } else {
             &search_text
         };
-        
+
         let text_color = if self.search_state.is_active {
             Color::Yellow
         } else if !self.search_state.query.is_empty() {
@@ -1628,13 +1976,13 @@ impl TUIApp {
         } else {
             Color::Gray
         };
-        
+
         let border_color = if self.search_state.is_active {
             Color::Yellow
         } else {
             Color::Blue
         };
-        
+
         let search_paragraph = Paragraph::new(display_text)
             .block(
                 Block::default()
@@ -1642,27 +1990,29 @@ impl TUIApp {
                     .border_type(BorderType::Rounded)
                     .title(Span::styled(
                         title,
-                        Style::default().fg(border_color).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(border_color)
+                            .add_modifier(Modifier::BOLD),
                     ))
                     .title_alignment(Alignment::Left)
-                    .style(Style::default().fg(border_color))
+                    .style(Style::default().fg(border_color)),
             )
             .style(Style::default().fg(text_color))
             .alignment(Alignment::Left);
-        
+
         f.render_widget(search_paragraph, area);
     }
 
     fn render_create_reminder(&mut self, f: &mut Frame) {
         let area = f.area();
-        
+
         if let Some(ref form) = self.create_form {
             let main_layout = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(0),     // Form content
-                    Constraint::Length(3),  // Controls
-                    Constraint::Length(3)   // Status log
+                    Constraint::Min(0),    // Form content
+                    Constraint::Length(3), // Controls
+                    Constraint::Length(3), // Status log
                 ])
                 .margin(2)
                 .split(area);
@@ -1681,103 +2031,147 @@ impl TUIApp {
 
             // Title field
             let title_style = if form.current_field == 0 {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
-            
-            let title_paragraph = Paragraph::new(if form.title.is_empty() { "New Reminder" } else { &form.title })
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .title(Span::styled(" Title ", title_style))
-                        .style(title_style)
-                );
+
+            let title_paragraph = Paragraph::new(if form.title.is_empty() {
+                "New Reminder"
+            } else {
+                &form.title
+            })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(" Title ", title_style))
+                    .style(title_style),
+            );
             f.render_widget(title_paragraph, form_layout[0]);
 
             // Notes field
             let notes_style = if form.current_field == 1 {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
-            
-            let notes_paragraph = Paragraph::new(if form.notes.is_empty() { "Add some notes..." } else { &form.notes })
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .title(Span::styled(" Notes ", notes_style))
-                        .style(notes_style)
-                )
-                .wrap(ratatui::widgets::Wrap { trim: true });
+
+            let notes_paragraph = Paragraph::new(if form.notes.is_empty() {
+                "Add some notes..."
+            } else {
+                &form.notes
+            })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(" Notes ", notes_style))
+                    .style(notes_style),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: true });
             f.render_widget(notes_paragraph, form_layout[1]);
 
             // Date field
             let date_style = if form.current_field == 2 {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
-            
-            let date_paragraph = Paragraph::new(if form.due_date.is_empty() { "No Date" } else { &form.due_date })
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .title(Span::styled(" Date ", date_style))
-                        .style(date_style)
-                );
+
+            let date_paragraph = Paragraph::new(if form.due_date.is_empty() {
+                "No Date"
+            } else {
+                &form.due_date
+            })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(" Date ", date_style))
+                    .style(date_style),
+            );
             f.render_widget(date_paragraph, form_layout[2]);
 
             // List field
             let list_style = if form.current_field == 3 {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
-            
-            let selected_list_name = self.lists.iter()
+
+            let selected_list_name = self
+                .lists
+                .iter()
                 .find(|l| l.id == form.selected_list_id)
                 .map(|l| l.name.as_str())
                 .unwrap_or("Unknown");
-                
-            let list_paragraph = Paragraph::new(selected_list_name)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .title(Span::styled(" List ", list_style))
-                        .style(list_style)
-                );
+
+            let list_paragraph = Paragraph::new(selected_list_name).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(" List ", list_style))
+                    .style(list_style),
+            );
             f.render_widget(list_paragraph, form_layout[3]);
 
             // Priority field
             let priority_style = if form.current_field == 4 {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
-            
-            let priority_text = if form.priority == 0 { "None".to_string() } else { form.priority.to_string() };
-            let priority_paragraph = Paragraph::new(priority_text)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .title(Span::styled(" Priority ", priority_style))
-                        .style(priority_style)
-                );
+
+            let priority_text = if form.priority == 0 {
+                "None".to_string()
+            } else {
+                form.priority.to_string()
+            };
+            let priority_paragraph = Paragraph::new(priority_text).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(" Priority ", priority_style))
+                    .style(priority_style),
+            );
             f.render_widget(priority_paragraph, form_layout[4]);
 
             // Instructions
             let instructions = Paragraph::new(vec![Line::from(vec![
-                Span::styled("Tab", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "Tab",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
-                Span::styled("Ctrl+S", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "Ctrl+S",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(" create  ", Style::default().fg(Color::Gray)),
-                Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(
+                    "q",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(Color::DarkGray),
+                ),
                 Span::styled(" cancel", Style::default().fg(Color::Gray)),
             ])])
             .block(
@@ -1786,15 +2180,17 @@ impl TUIApp {
                     .border_type(BorderType::Rounded)
                     .title(Span::styled(
                         " Controls ",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     ))
                     .title_alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::Yellow))
+                    .style(Style::default().fg(Color::Yellow)),
             )
             .alignment(Alignment::Center);
 
             f.render_widget(instructions, main_layout[1]);
-            
+
             // Status log
             self.render_status_log(f, main_layout[2]);
         }
@@ -1804,31 +2200,33 @@ impl TUIApp {
         let log_lines: Vec<Line> = if self.status_log.is_empty() {
             vec![Line::from(Span::styled(
                 "Ready",
-                Style::default().fg(Color::Green)
+                Style::default().fg(Color::Green),
             ))]
         } else {
-            self.status_log.iter().map(|msg| {
-                // Add thinking animation to loading messages
-                if msg.contains("Loading") || msg.contains("⏳") {
-                    let thinking_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
-                    let current_char = thinking_chars[self.loading_animation_state];
-                    Line::from(vec![
-                        Span::styled(
-                            current_char,
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-                        ),
-                        Span::styled(
-                            format!(" {}", msg.replace("⏳ ", "")),
-                            Style::default().fg(Color::Cyan)
-                        )
-                    ])
-                } else {
-                    Line::from(Span::styled(
-                        msg,
-                        Style::default().fg(Color::Cyan)
-                    ))
-                }
-            }).collect()
+            self.status_log
+                .iter()
+                .map(|msg| {
+                    // Add thinking animation to loading messages
+                    if msg.contains("Loading") || msg.contains("⏳") {
+                        let thinking_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+                        let current_char = thinking_chars[self.loading_animation_state];
+                        Line::from(vec![
+                            Span::styled(
+                                current_char,
+                                Style::default()
+                                    .fg(Color::Cyan)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!(" {}", msg.replace("⏳ ", "")),
+                                Style::default().fg(Color::Cyan),
+                            ),
+                        ])
+                    } else {
+                        Line::from(Span::styled(msg, Style::default().fg(Color::Cyan)))
+                    }
+                })
+                .collect()
         };
 
         let status_paragraph = Paragraph::new(log_lines)
@@ -1838,10 +2236,12 @@ impl TUIApp {
                     .border_type(BorderType::Rounded)
                     .title(Span::styled(
                         " Status ",
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
                     ))
                     .title_alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::Cyan))
+                    .style(Style::default().fg(Color::Cyan)),
             )
             .wrap(ratatui::widgets::Wrap { trim: true });
 
