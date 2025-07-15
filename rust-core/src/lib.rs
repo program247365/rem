@@ -1,12 +1,24 @@
 use std::sync::Mutex;
+use std::io;
+use crossterm::{
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    event::{DisableMouseCapture, EnableMouseCapture},
+};
+use ratatui::{backend::CrosstermBackend, Terminal};
 
 pub mod tui;
 pub mod types;
 
 use tui::TUIApp;
 
-// Global TUI state management
-static TUI_APP: Mutex<Option<TUIApp>> = Mutex::new(None);
+// Global TUI state management  
+struct GlobalTuiState {
+    app: TUIApp,
+    is_initialized: bool,
+}
+
+static TUI_STATE: Mutex<Option<GlobalTuiState>> = Mutex::new(None);
 
 #[derive(uniffi::Record)]
 pub struct ReminderList {
@@ -47,6 +59,8 @@ pub enum TuiAction {
     Refresh,
     ToggleCompletedVisibility,
     GlobalSearch { query: String },
+    ShowLoading { message: String },
+    DataLoaded,
 }
 
 #[derive(uniffi::Error, thiserror::Error, Debug)]
@@ -65,20 +79,127 @@ pub fn start_tui(lists: Vec<ReminderList>) -> Result<Vec<TuiAction>, RemError> {
     let actions = tui_app.run()?;
     
     // Store the app state for subsequent calls
-    let mut global_tui = TUI_APP.lock().unwrap();
-    *global_tui = Some(tui_app);
+    let mut global_state = TUI_STATE.lock().unwrap();
+    *global_state = Some(GlobalTuiState {
+        app: tui_app,
+        is_initialized: true,
+    });
     
     Ok(actions)
+}
+
+#[uniffi::export]
+pub fn run_persistent_tui(lists: Vec<ReminderList>) -> Result<Vec<TuiAction>, RemError> {
+    let mut global_state = TUI_STATE.lock().unwrap();
+    
+    // Initialize the TUI app
+    let mut tui_app = TUIApp::new(lists)?;
+    
+    // Setup terminal
+    enable_raw_mode().map_err(|e| {
+        RemError::TUIError { 
+            message: format!("Failed to enable raw mode: {}. Try running in a different terminal.", e) 
+        }
+    })?;
+    
+    let mut stdout = io::stdout();
+    
+    // Try alternate screen and mouse capture with fallback
+    if let Err(e) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+        // Fallback: try without mouse capture
+        execute!(stdout, EnterAlternateScreen)
+            .map_err(|e2| RemError::TUIError { 
+                message: format!("Terminal setup failed: {}. Original error: {}", e2, e) 
+            })?;
+    }
+    
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).map_err(|e| {
+        RemError::TUIError { 
+            message: format!("Failed to create terminal: {}. Check terminal compatibility.", e) 
+        }
+    })?;
+    
+    // Run the first iteration to get initial actions
+    let actions = tui_app.run_persistent_iteration(&mut terminal)?;
+    
+    // Store the app state globally
+    *global_state = Some(GlobalTuiState {
+        app: tui_app,
+        is_initialized: true,
+    });
+    
+    Ok(actions)
+}
+
+#[uniffi::export]
+pub fn continue_persistent_tui() -> Result<Vec<TuiAction>, RemError> {
+    let mut global_state = TUI_STATE.lock().unwrap();
+    
+    if let Some(ref mut state) = global_state.as_mut() {
+        if !state.is_initialized {
+            return Err(RemError::TUIError { message: "TUI not properly initialized".to_string() });
+        }
+        
+        // Create a new terminal for this iteration
+        let mut stdout = io::stdout();
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend).map_err(|e| {
+            RemError::TUIError { 
+                message: format!("Failed to create terminal: {}. Check terminal compatibility.", e) 
+            }
+        })?;
+        
+        let actions = state.app.run_persistent_iteration(&mut terminal)?;
+        Ok(actions)
+    } else {
+        Err(RemError::TUIError { message: "TUI not initialized".to_string() })
+    }
+}
+
+#[uniffi::export]
+pub fn shutdown_tui() -> Result<(), RemError> {
+    let mut global_state = TUI_STATE.lock().unwrap();
+    
+    if let Some(mut state) = global_state.take() {
+        // Restore terminal
+        disable_raw_mode().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        
+        // Create a terminal just to properly restore it
+        let mut stdout = io::stdout();
+        execute!(
+            stdout,
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )
+        .map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        
+        // Don't need to call show_cursor since we're exiting anyway
+        
+        state.is_initialized = false;
+    }
+    
+    Ok(())
 }
 
 
 #[uniffi::export]
 pub fn render_reminders_view(reminders: Vec<Reminder>) -> Result<Vec<TuiAction>, RemError> {
-    let mut global_tui = TUI_APP.lock().unwrap();
+    let mut global_state = TUI_STATE.lock().unwrap();
     
-    if let Some(ref mut tui_app) = global_tui.as_mut() {
-        tui_app.set_reminders(reminders);
-        let actions = tui_app.run_reminders_view()?;
+    if let Some(ref mut state) = global_state.as_mut() {
+        state.app.set_reminders(reminders);
+        
+        // Create a new terminal for this iteration
+        let mut stdout = io::stdout();
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend).map_err(|e| {
+            RemError::TUIError { 
+                message: format!("Failed to create terminal: {}. Check terminal compatibility.", e) 
+            }
+        })?;
+        
+        let actions = state.app.run_persistent_iteration(&mut terminal)?;
         Ok(actions)
     } else {
         Err(RemError::TUIError { message: "TUI not initialized".to_string() })
@@ -87,10 +208,12 @@ pub fn render_reminders_view(reminders: Vec<Reminder>) -> Result<Vec<TuiAction>,
 
 #[uniffi::export]
 pub fn set_reminders(reminders: Vec<Reminder>) -> Result<(), RemError> {
-    let mut global_tui = TUI_APP.lock().unwrap();
+    let mut global_state = TUI_STATE.lock().unwrap();
     
-    if let Some(ref mut tui_app) = global_tui.as_mut() {
-        tui_app.set_reminders(reminders);
+    if let Some(ref mut state) = global_state.as_mut() {
+        // Add status message before setting reminders
+        state.app.add_status_log("✅ Reminders loaded successfully".to_string());
+        state.app.set_reminders(reminders);
         Ok(())
     } else {
         Err(RemError::TUIError { message: "TUI not initialized".to_string() })
@@ -99,9 +222,12 @@ pub fn set_reminders(reminders: Vec<Reminder>) -> Result<(), RemError> {
 
 #[uniffi::export]
 pub fn set_global_reminders(reminders: Vec<Reminder>, list_names: Vec<String>) -> Result<(), RemError> {
-    let mut global_tui = TUI_APP.lock().unwrap();
+    let mut global_state = TUI_STATE.lock().unwrap();
     
-    if let Some(ref mut tui_app) = global_tui.as_mut() {
+    if let Some(ref mut state) = global_state.as_mut() {
+        // Add status message for global search completion
+        state.app.add_status_log("✅ Global search completed".to_string());
+        
         // Create all_reminders with actual list names
         let all_reminders: Vec<(Reminder, String)> = reminders
             .iter()
@@ -109,7 +235,7 @@ pub fn set_global_reminders(reminders: Vec<Reminder>, list_names: Vec<String>) -
             .map(|(reminder, list_name)| (reminder.clone(), list_name.clone()))
             .collect();
         
-        tui_app.set_reminders_with_global_data(reminders, all_reminders);
+        state.app.set_reminders_with_global_data(reminders, all_reminders);
         Ok(())
     } else {
         Err(RemError::TUIError { message: "TUI not initialized".to_string() })

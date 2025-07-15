@@ -44,7 +44,7 @@ struct RemTUIApp {
             }
             
             print("✅ Found \(lists.count) lists. Starting TUI...")
-            // Start single TUI session with async operation handling
+            // Start persistent TUI session with proper bidirectional communication
             await runPersistentTUI(lists: lists, remindersService: remindersService)
             
         } catch {
@@ -53,105 +53,100 @@ struct RemTUIApp {
         }
     }
     
-    // SIMPLE: Test with the original working TUI first
+    // Truly persistent TUI that handles actions and continues running
     private static func runPersistentTUI(lists: [ReminderList], remindersService: RemindersService) async {
         var currentLists = lists
+        var isRunning = true
         
-        while true {
-            do {
-                let actions = try startTui(lists: currentLists)
-                
-                var shouldExit = false
+        do {
+            // Initialize the persistent TUI
+            var actions = try runPersistentTui(lists: currentLists)
+            
+            // Main communication loop
+            while isRunning {
                 for action in actions {
                     switch action {
                     case .quit:
-                        shouldExit = true
-                        break
+                        try shutdownTui()
+                        isRunning = false
+                        return
                         
                     case .selectList(let listId):
                         do {
                             let reminders = try await remindersService.fetchReminders(for: listId)
-                            let reminderActions = try renderRemindersView(reminders: reminders)
-                            
-                            for reminderAction in reminderActions {
-                                switch reminderAction {
-                                case .quit:
-                                    shouldExit = true
-                                    break
-                                case .back:
-                                    break
-                                case .toggleReminder(let reminderId):
-                                    try await remindersService.toggleReminder(reminderId)
-                                case .deleteReminder(let reminderId):
-                                    try await remindersService.deleteReminder(reminderId)
-                                case .createReminder(let newReminder):
-                                    try await remindersService.createReminder(newReminder)
-                                default:
-                                    break
-                                }
-                            }
+                            try setReminders(reminders: reminders)
                         } catch {
-                            // Handle error and continue
+                            // Error handling - TUI will show appropriate status
+                        }
+                        
+                    case .globalSearch(let query):
+                        do {
+                            let (allReminders, listNames) = try await remindersService.searchAllReminders(query: query)
+                            try setGlobalReminders(reminders: allReminders, listNames: listNames)
+                        } catch {
+                            // Error handling - TUI will show appropriate status
+                        }
+                        
+                    case .toggleReminder(let reminderId):
+                        do {
+                            try await remindersService.toggleReminder(reminderId)
+                        } catch {
+                            // Error handling - TUI will show appropriate status
+                        }
+                        
+                    case .deleteReminder(let reminderId):
+                        do {
+                            try await remindersService.deleteReminder(reminderId)
+                        } catch {
+                            // Error handling - TUI will show appropriate status
+                        }
+                        
+                    case .createReminder(let newReminder):
+                        do {
+                            try await remindersService.createReminder(newReminder)
+                        } catch {
+                            // Error handling - TUI will show appropriate status
                         }
                         
                     case .refresh:
-                        currentLists = try await remindersService.fetchLists()
-                        
-                    case .globalSearch(_):
                         do {
-                            // Load all reminders from all lists for global search with list names
-                            var allReminders: [Reminder] = []
-                            var listNames: [String] = []
-                            
-                            for list in currentLists {
-                                let listReminders = try await remindersService.fetchReminders(for: list.id)
-                                for reminder in listReminders {
-                                    allReminders.append(reminder)
-                                    listNames.append(list.name)
-                                }
-                            }
-                            
-                            // Set all reminders with list names for global search
-                            try setGlobalReminders(reminders: allReminders, listNames: listNames)
-                            
-                            // Continue with reminders view loop for global search
-                            let reminderActions = try renderRemindersView(reminders: allReminders)
-                            
-                            for reminderAction in reminderActions {
-                                switch reminderAction {
-                                case .quit:
-                                    shouldExit = true
-                                    break
-                                case .back:
-                                    break
-                                case .toggleReminder(let reminderId):
-                                    try await remindersService.toggleReminder(reminderId)
-                                case .deleteReminder(let reminderId):
-                                    try await remindersService.deleteReminder(reminderId)
-                                case .createReminder(let newReminder):
-                                    try await remindersService.createReminder(newReminder)
-                                default:
-                                    break
-                                }
-                            }
+                            currentLists = try await remindersService.fetchLists()
                         } catch {
-                            // Handle error and continue
-                            print("❌ Global search error: \(error)")
+                            // Error handling - TUI will show appropriate status
                         }
                         
-                    default:
+                    case .back:
+                        // No specific action needed - TUI handles navigation
+                        break
+                        
+                    case .toggleCompletedVisibility:
+                        // No specific action needed - TUI handles this internally
+                        break
+                        
+                    case .showLoading(_):
+                        // No specific action needed - just status
+                        break
+                        
+                    case .dataLoaded:
+                        // No specific action needed - just status
                         break
                     }
                 }
                 
-                if shouldExit {
-                    break
+                // Continue the TUI and get the next set of actions
+                if isRunning {
+                    actions = try continuePersistentTui()
                 }
-                
-            } catch {
-                print("❌ TUI error: \(error)")
-                break
             }
+            
+        } catch {
+            // Attempt graceful shutdown
+            do {
+                try shutdownTui()
+            } catch {
+                // Silent failure - TUI is shutting down anyway
+            }
+            exit(1)
         }
     }
 }

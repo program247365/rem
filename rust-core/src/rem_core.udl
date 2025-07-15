@@ -3,6 +3,12 @@ namespace rem_core {
     sequence<TuiAction> start_tui(sequence<ReminderList> lists);
     
     [Throws=RemError]
+    sequence<TuiAction> run_persistent_tui(sequence<ReminderList> lists);
+    
+    [Throws=RemError]
+    sequence<TuiAction> continue_persistent_tui();
+    
+    [Throws=RemError]
     sequence<TuiAction> render_reminders_view(sequence<Reminder> reminders);
     
     [Throws=RemError]
@@ -10,6 +16,9 @@ namespace rem_core {
     
     [Throws=RemError]
     void set_global_reminders(sequence<Reminder> reminders, sequence<string> list_names);
+    
+    [Throws=RemError]
+    void shutdown_tui();
     
     
 };
@@ -50,6 +59,8 @@ interface TuiAction {
     Refresh();
     ToggleCompletedVisibility();
     GlobalSearch(string query);
+    ShowLoading(string message);
+    DataLoaded();
 };
 
 [Error]

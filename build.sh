@@ -12,11 +12,13 @@ echo "🔗 Generating UniFFI bindings..."
 # Generate Swift bindings from the UDL file
 cargo run --bin uniffi-bindgen generate src/rem_core.udl --language swift --out-dir ../RemTUIKit/Sources/
 
-# Move FFI headers to the correct location for Package.swift
+# Move FFI headers and Swift files to the correct location for Package.swift
 echo "🔧 Organizing FFI files..."
 mkdir -p ../RemTUIKit/Sources/RemCoreFFI/include/
 mv ../RemTUIKit/Sources/RemCoreFFI.h ../RemTUIKit/Sources/RemCoreFFI/include/
 mv ../RemTUIKit/Sources/RemCoreFFI.modulemap ../RemTUIKit/Sources/RemCoreFFI/include/module.modulemap
+# Move RemCore.swift to the RemTUIKit module directory
+mv ../RemTUIKit/Sources/RemCore.swift ../RemTUIKit/Sources/RemTUIKit/
 
 # Copy the generated library to the Swift package
 echo "📦 Copying Rust library..."

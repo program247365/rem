@@ -63,11 +63,19 @@ typedef struct RustCallStatus {
 typedef void (*UniFfiRustFutureContinuation)(void * _Nonnull, int8_t);
 
 // Scaffolding functions
+RustBuffer uniffi_rem_core_fn_func_continue_persistent_tui(RustCallStatus *_Nonnull out_status
+    
+);
 RustBuffer uniffi_rem_core_fn_func_render_reminders_view(RustBuffer reminders, RustCallStatus *_Nonnull out_status
+);
+RustBuffer uniffi_rem_core_fn_func_run_persistent_tui(RustBuffer lists, RustCallStatus *_Nonnull out_status
 );
 void uniffi_rem_core_fn_func_set_global_reminders(RustBuffer reminders, RustBuffer list_names, RustCallStatus *_Nonnull out_status
 );
 void uniffi_rem_core_fn_func_set_reminders(RustBuffer reminders, RustCallStatus *_Nonnull out_status
+);
+void uniffi_rem_core_fn_func_shutdown_tui(RustCallStatus *_Nonnull out_status
+    
 );
 RustBuffer uniffi_rem_core_fn_func_start_tui(RustBuffer lists, RustCallStatus *_Nonnull out_status
 );
@@ -185,13 +193,22 @@ void ffi_rem_core_rust_future_free_void(void* _Nonnull handle
 );
 void ffi_rem_core_rust_future_complete_void(void* _Nonnull handle, RustCallStatus *_Nonnull out_status
 );
+uint16_t uniffi_rem_core_checksum_func_continue_persistent_tui(void
+    
+);
 uint16_t uniffi_rem_core_checksum_func_render_reminders_view(void
+    
+);
+uint16_t uniffi_rem_core_checksum_func_run_persistent_tui(void
     
 );
 uint16_t uniffi_rem_core_checksum_func_set_global_reminders(void
     
 );
 uint16_t uniffi_rem_core_checksum_func_set_reminders(void
+    
+);
+uint16_t uniffi_rem_core_checksum_func_shutdown_tui(void
     
 );
 uint16_t uniffi_rem_core_checksum_func_start_tui(void

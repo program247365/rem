@@ -140,6 +140,44 @@ public class RemindersService: ObservableObject {
         try eventStore.save(reminder, commit: true)
     }
     
+    public func searchAllReminders(query: String) async throws -> ([Reminder], [String]) {
+        let calendars = eventStore.calendars(for: .reminder)
+        var allReminders: [Reminder] = []
+        var listNames: [String] = []
+        
+        for calendar in calendars {
+            let predicate = eventStore.predicateForReminders(in: [calendar])
+            
+            let reminders = try await withCheckedThrowingContinuation { continuation in
+                eventStore.fetchReminders(matching: predicate) { reminders in
+                    continuation.resume(returning: reminders ?? [])
+                }
+            }
+            
+            for ekReminder in reminders {
+                // Filter by query if provided
+                if query.isEmpty || 
+                   ekReminder.title?.lowercased().contains(query.lowercased()) == true ||
+                   ekReminder.notes?.lowercased().contains(query.lowercased()) == true {
+                    
+                    let reminder = Reminder(
+                        id: ekReminder.calendarItemIdentifier,
+                        title: ekReminder.title ?? "",
+                        notes: ekReminder.notes,
+                        completed: ekReminder.isCompleted,
+                        priority: UInt8(ekReminder.priority),
+                        dueDate: ekReminder.dueDateComponents?.date?.ISO8601Format()
+                    )
+                    
+                    allReminders.append(reminder)
+                    listNames.append(calendar.title)
+                }
+            }
+        }
+        
+        return (allReminders, listNames)
+    }
+    
     private func getReminderCount(for calendar: EKCalendar) async throws -> Int {
         let predicate = eventStore.predicateForReminders(in: [calendar])
         

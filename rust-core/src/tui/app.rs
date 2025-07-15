@@ -14,6 +14,7 @@ use ratatui::{
 };
 use std::io;
 use std::time::{Duration, Instant};
+use std::thread;
 
 pub struct TUIApp {
     lists: Vec<ReminderList>,
@@ -163,6 +164,19 @@ impl TUIApp {
     pub fn set_reminders(&mut self, reminders: Vec<Reminder>) {
         self.current_reminders = reminders.clone();
         
+        // Transition from loading to reminders view
+        if matches!(self.current_view, AppView::Loading) {
+            // Determine the appropriate view based on the current context
+            if self.search_state.is_global {
+                self.current_view = AppView::Reminders { list_id: "global".to_string() };
+            } else {
+                // For regular list selection, use a generic identifier
+                self.current_view = AppView::Reminders { list_id: "selected".to_string() };
+            }
+            self.is_loading = false;
+            self.add_status_log("✅ Data loaded successfully".to_string());
+        }
+        
         // If we're in global search mode, also populate all_reminders for filtering
         if self.search_state.is_global || self.is_in_global_search_view() {
             // For global search, create all_reminders with a placeholder list name
@@ -177,6 +191,14 @@ impl TUIApp {
     pub fn set_reminders_with_global_data(&mut self, reminders: Vec<Reminder>, all_reminders: Vec<(Reminder, String)>) {
         self.current_reminders = reminders;
         self.all_reminders = all_reminders;
+        
+        // Transition from loading to global reminders view
+        if matches!(self.current_view, AppView::Loading) {
+            self.current_view = AppView::Reminders { list_id: "global".to_string() };
+            self.is_loading = false;
+            self.add_status_log("✅ Global search data loaded successfully".to_string());
+        }
+        
         self.selected_index = 0;
         self.list_state.select(if self.current_reminders.is_empty() { None } else { Some(0) });
     }
@@ -373,6 +395,75 @@ impl TUIApp {
         result
     }
 
+    pub fn continue_running(&mut self) -> Result<Vec<TuiAction>, RemError> {
+        // This method continues the TUI from where it left off
+        // It's used when Swift has processed actions and wants to continue the TUI loop
+        self.actions.clear();
+        
+        loop {
+            // Check if terminal is still available
+            if self.should_exit {
+                break;
+            }
+            
+            // For continue_running, we need to handle the display differently
+            // The TUI continues from its current state
+            if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
+                if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
+                    if key.kind == KeyEventKind::Press {
+                        self.handle_key_event(key);
+                    }
+                }
+            }
+            
+            if !self.actions.is_empty() {
+                break;
+            }
+        }
+        
+        Ok(self.actions.clone())
+    }
+
+    pub fn run_persistent(&mut self) -> Result<Vec<TuiAction>, RemError> {
+        // Setup terminal with better error handling
+        enable_raw_mode().map_err(|e| {
+            RemError::TUIError { 
+                message: format!("Failed to enable raw mode: {}. Try running in a different terminal.", e) 
+            }
+        })?;
+        
+        let mut stdout = io::stdout();
+        
+        // Try alternate screen and mouse capture with fallback
+        if let Err(e) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+            // Fallback: try without mouse capture
+            execute!(stdout, EnterAlternateScreen)
+                .map_err(|e2| RemError::TUIError { 
+                    message: format!("Terminal setup failed: {}. Original error: {}", e2, e) 
+                })?;
+        }
+        
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend).map_err(|e| {
+            RemError::TUIError { 
+                message: format!("Failed to create terminal: {}. Check terminal compatibility.", e) 
+            }
+        })?;
+        
+        let result = self.run_persistent_app(&mut terminal);
+        
+        // Restore terminal
+        disable_raw_mode().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )
+        .map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        terminal.show_cursor().map_err(|e| RemError::TUIError { message: e.to_string() })?;
+        
+        result
+    }
 
     pub fn run_reminders_view(&mut self) -> Result<Vec<TuiAction>, RemError> {
         // For reminders view, just handle the reminders display
@@ -427,6 +518,116 @@ impl TUIApp {
         Ok(self.actions.clone())
     }
 
+    fn run_persistent_app<B: ratatui::backend::Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<Vec<TuiAction>, RemError> {
+        // This is the main persistent loop that should never exit except on quit
+        loop {
+            self.actions.clear();
+            
+            // Inner loop for handling user input and displaying UI
+            loop {
+                terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+                
+                if self.should_exit {
+                    return Ok(vec![TuiAction::Quit]);
+                }
+                
+                if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
+                    if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
+                        if key.kind == KeyEventKind::Press {
+                            self.handle_key_event(key);
+                        }
+                    }
+                }
+                
+                // If we have actions, process them
+                if !self.actions.is_empty() {
+                    break;
+                }
+            }
+            
+            // Check if we should exit the entire TUI
+            if self.actions.iter().any(|a| matches!(a, TuiAction::Quit)) {
+                break;
+            }
+            
+            // Check if we should show a loading state and wait for data
+            if self.actions.iter().any(|a| matches!(a, TuiAction::SelectList { .. } | TuiAction::GlobalSearch { .. } | TuiAction::Refresh)) {
+                // Show the loading screen for at least a few frames so user sees it
+                let mut frames_shown = 0;
+                while frames_shown < 5 {  // Show loading for at least 5 frames (~250ms)
+                    terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+                    frames_shown += 1;
+                    thread::sleep(Duration::from_millis(50));
+                }
+                
+                // Continue showing loading screen until data is loaded
+                // This keeps the TUI visible while Swift processes the action
+                while matches!(self.current_view, AppView::Loading) {
+                    terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+                    thread::sleep(Duration::from_millis(50));
+                    
+                    // Check if we should exit while waiting
+                    if event::poll(Duration::from_millis(10)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
+                        if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
+                            if key.kind == KeyEventKind::Press && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+                                self.should_exit = true;
+                                return Ok(vec![TuiAction::Quit]);
+                            }
+                        }
+                    }
+                }
+                
+                // Data has been loaded, continue the loop
+                continue;
+            }
+            
+            // For other actions (like toggleReminder, deleteReminder), just continue
+            // The TUI stays running
+        }
+        
+        Ok(self.actions.clone())
+    }
+
+    pub fn run_persistent_iteration<B: ratatui::backend::Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<Vec<TuiAction>, RemError> {
+        self.actions.clear();
+        
+        // Handle the display and input for one iteration
+        loop {
+            terminal.draw(|f| self.ui(f)).map_err(|e| RemError::TUIError { message: e.to_string() })?;
+            
+            if self.should_exit {
+                return Ok(vec![TuiAction::Quit]);
+            }
+            
+            if event::poll(Duration::from_millis(50)).map_err(|e| RemError::TUIError { message: e.to_string() })? {
+                if let Event::Key(key) = event::read().map_err(|e| RemError::TUIError { message: e.to_string() })? {
+                    if key.kind == KeyEventKind::Press {
+                        self.handle_key_event(key);
+                    }
+                }
+            }
+            
+            // If we have actions to process, return them to Swift
+            if !self.actions.is_empty() {
+                break;
+            }
+            
+            // Update loading animation if in loading state
+            if matches!(self.current_view, AppView::Loading) && self.is_loading {
+                if let Some(last_update) = self.last_animation_update {
+                    if last_update.elapsed() >= Duration::from_millis(200) {
+                        self.loading_animation_state = (self.loading_animation_state + 1) % 4;
+                        self.last_animation_update = Some(Instant::now());
+                    }
+                } else {
+                    self.last_animation_update = Some(Instant::now());
+                }
+            }
+        }
+        
+        Ok(self.actions.clone())
+    }
+
     fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) {
         // Handle search mode first
         if self.search_state.is_active {
@@ -459,10 +660,13 @@ impl TUIApp {
         if key.code == KeyCode::Char('/') {
             match &self.current_view {
                 AppView::Lists => {
+                    // Show loading screen immediately for global search
+                    self.is_loading = true;
+                    self.loading_message = "Loading global search...".to_string();
+                    self.current_view = AppView::Loading;
                     self.search_state.start_search(true); // Global search from lists
-                    self.add_status_log("🔍 Global search started...".to_string());
-                    // Switch to reminders view with special global identifier
-                    self.current_view = AppView::Reminders { list_id: "global".to_string() };
+                    self.add_status_log("🔍 Loading global search...".to_string());
+                    
                     // Trigger loading of all reminders
                     self.actions.push(TuiAction::GlobalSearch { query: "".to_string() });
                     return;
@@ -596,9 +800,15 @@ impl TUIApp {
             KeyCode::Enter => {
                 if let Some(list) = self.lists.get(self.selected_index) {
                     let list_id = list.id.clone();
-                    // Switch view immediately
-                    self.current_view = AppView::Reminders { list_id: list_id.clone() };
-                    self.add_status_log("📋 Loading reminders...".to_string());
+                    let list_name = list.name.clone();
+                    
+                    // Show loading screen immediately before any network call
+                    self.is_loading = true;
+                    self.loading_message = format!("Loading {} reminders...", list_name);
+                    self.current_view = AppView::Loading;
+                    self.add_status_log(format!("📋 Loading {} reminders...", list_name));
+                    
+                    // Push action for Swift to handle
                     self.actions.push(TuiAction::SelectList { list_id });
                 }
             }
@@ -819,28 +1029,81 @@ impl TUIApp {
             .margin(1)
             .split(area);
 
+        // Create gradient-like effect with different colors
+        let dots = "•".repeat((self.loading_animation_state % 4) + 1);
+        let padding = " ".repeat(3 - (self.loading_animation_state % 4));
+        
         let loading_text = vec![
             Line::from(""),
             Line::from(""),
             Line::from(vec![
                 Span::styled(
+                    "      ╭─────────────────────────────────────────╮",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "      │              ",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                ),
+                Span::styled(
+                    "🍎 Rem TUI",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                ),
+                Span::styled(
+                    "              │",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "      ╰─────────────────────────────────────────╯",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    "             ",
+                    Style::default()
+                ),
+                Span::styled(
                     current_char,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                ),
+                Span::styled(
+                    " ",
+                    Style::default()
+                ),
+                Span::styled(
+                    &self.loading_message,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
+                ),
+                Span::styled(
+                    &dots,
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD)
                 ),
                 Span::styled(
-                    " Loading Apple Reminders...",
+                    &padding,
                     Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
                 ),
             ]),
             Line::from(""),
-            Line::from(Span::styled(
-                &self.loading_message,
-                Style::default().fg(Color::Gray)
-            )),
+            Line::from(vec![
+                Span::styled(
+                    "          🔄 Connecting to Apple Reminders",
+                    Style::default()
+                        .fg(Color::Gray)
+                ),
+            ]),
+            Line::from(""),
         ];
 
         let paragraph = Paragraph::new(loading_text)

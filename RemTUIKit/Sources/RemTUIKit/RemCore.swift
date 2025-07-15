@@ -697,6 +697,8 @@ public enum TuiAction {
     case refresh
     case toggleCompletedVisibility
     case globalSearch(query: String)
+    case showLoading(message: String)
+    case dataLoaded
 }
 
 public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
@@ -733,6 +735,12 @@ public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
         case 9: return .globalSearch(
             query: try FfiConverterString.read(from: &buf)
         )
+        
+        case 10: return .showLoading(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 11: return .dataLoaded
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -782,6 +790,15 @@ public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
             writeInt(&buf, Int32(9))
             FfiConverterString.write(query, into: &buf)
             
+        
+        case let .showLoading(message):
+            writeInt(&buf, Int32(10))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case .dataLoaded:
+            writeInt(&buf, Int32(11))
+        
         }
     }
 }
@@ -909,11 +926,28 @@ fileprivate struct FfiConverterSequenceTypeTuiAction: FfiConverterRustBuffer {
     }
 }
 
+public func continuePersistentTui() throws -> [TuiAction] {
+    return try  FfiConverterSequenceTypeTuiAction.lift(
+        try rustCallWithError(FfiConverterTypeRemError.lift) {
+    uniffi_rem_core_fn_func_continue_persistent_tui($0)
+}
+    )
+}
+
 public func renderRemindersView(reminders: [Reminder]) throws -> [TuiAction] {
     return try  FfiConverterSequenceTypeTuiAction.lift(
         try rustCallWithError(FfiConverterTypeRemError.lift) {
     uniffi_rem_core_fn_func_render_reminders_view(
         FfiConverterSequenceTypeReminder.lower(reminders),$0)
+}
+    )
+}
+
+public func runPersistentTui(lists: [ReminderList]) throws -> [TuiAction] {
+    return try  FfiConverterSequenceTypeTuiAction.lift(
+        try rustCallWithError(FfiConverterTypeRemError.lift) {
+    uniffi_rem_core_fn_func_run_persistent_tui(
+        FfiConverterSequenceTypeReminderList.lower(lists),$0)
 }
     )
 }
@@ -932,6 +966,14 @@ public func setReminders(reminders: [Reminder]) throws {
     try rustCallWithError(FfiConverterTypeRemError.lift) {
     uniffi_rem_core_fn_func_set_reminders(
         FfiConverterSequenceTypeReminder.lower(reminders),$0)
+}
+}
+
+
+
+public func shutdownTui() throws {
+    try rustCallWithError(FfiConverterTypeRemError.lift) {
+    uniffi_rem_core_fn_func_shutdown_tui($0)
 }
 }
 
@@ -961,13 +1003,22 @@ private var initializationResult: InitializationResult {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_rem_core_checksum_func_continue_persistent_tui() != 21085) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_rem_core_checksum_func_render_reminders_view() != 27359) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_rem_core_checksum_func_run_persistent_tui() != 18082) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rem_core_checksum_func_set_global_reminders() != 46351) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rem_core_checksum_func_set_reminders() != 27881) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_rem_core_checksum_func_shutdown_tui() != 56565) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rem_core_checksum_func_start_tui() != 12292) {
