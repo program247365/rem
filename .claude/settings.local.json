@@ -29,7 +29,9 @@
       "Bash(/Users/kevin/.kevin/code/rem/test-toggle-functionality.swift)",
       "Bash(/Users/kevin/.kevin/code/rem/test-color-visibility.swift)",
       "Bash(yamllint:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(install_name_tool:*)",
+      "Bash(./rem-tui:*)"
     ],
     "deny": []
   }
