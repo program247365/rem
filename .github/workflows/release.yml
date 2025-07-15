@@ -27,24 +27,17 @@ jobs:
           rust-core/target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Install UniFFI bindgen
-      run: cargo install uniffi-bindgen
+    - name: Build UniFFI bindgen
+      run: make ci-build-uniffi-bindgen
     
     - name: Build release
-      run: make build
+      run: make ci-build-release
     
     - name: Create distribution package
-      run: |
-        mkdir -p dist
-        cp RemTUI/.build/release/RemTUI dist/rem-tui
-        cp rust-core/target/release/librem_core.dylib dist/
-        chmod +x dist/rem-tui
+      run: make ci-create-distribution-package
     
     - name: Create tarball
-      run: |
-        cd dist
-        tar -czf rem-tui-macos.tar.gz rem-tui librem_core.dylib
-        cd ..
+      run: make ci-create-tarball
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4

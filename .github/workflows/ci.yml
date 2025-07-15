@@ -30,25 +30,25 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Check Rust formatting
-      run: cd rust-core && cargo fmt --check
+      run: make ci-check-rust-formatting
     
     - name: Run Rust linter
-      run: cd rust-core && cargo clippy --all-targets --all-features -- -D warnings
+      run: make ci-run-rust-linter
     
-    - name: Install UniFFI bindgen
-      run: cargo install uniffi-bindgen
+    - name: Build UniFFI bindgen
+      run: make ci-build-uniffi-bindgen
     
     - name: Build Rust core
-      run: make build-rust
+      run: make ci-build-rust-core
     
     - name: Generate UniFFI bindings
-      run: make build-uniffi
+      run: make ci-generate-uniffi-bindings
     
     - name: Build Swift package
-      run: cd RemTUIKit && swift build -c release
+      run: make ci-build-swift-package
     
     - name: Build Swift executable
-      run: cd RemTUI && swift build -c release
+      run: make ci-build-swift-executable
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -79,17 +79,17 @@ jobs:
           rust-core/target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Install UniFFI bindgen
-      run: cargo install uniffi-bindgen
+    - name: Build UniFFI bindgen
+      run: make ci-build-uniffi-bindgen
     
     - name: Build for testing
-      run: make build
+      run: make ci-build-for-testing
     
     - name: Run Rust tests
-      run: make test-rust
+      run: make ci-run-rust-tests
     
     - name: Run Swift tests
-      run: make test-swift
+      run: make ci-run-swift-tests
 
   quality:
     name: Code Quality
@@ -112,8 +112,8 @@ jobs:
           rust-core/target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Install UniFFI bindgen
-      run: cargo install uniffi-bindgen
+    - name: Build UniFFI bindgen
+      run: make ci-build-uniffi-bindgen
     
     - name: Check code quality
-      run: make check
+      run: make ci-check-code-quality
