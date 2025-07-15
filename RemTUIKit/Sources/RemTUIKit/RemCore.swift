@@ -696,6 +696,7 @@ public enum TuiAction {
     case back
     case refresh
     case toggleCompletedVisibility
+    case globalSearch(query: String)
 }
 
 public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
@@ -728,6 +729,10 @@ public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
         case 7: return .refresh
         
         case 8: return .toggleCompletedVisibility
+        
+        case 9: return .globalSearch(
+            query: try FfiConverterString.read(from: &buf)
+        )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -772,6 +777,11 @@ public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
         case .toggleCompletedVisibility:
             writeInt(&buf, Int32(8))
         
+        
+        case let .globalSearch(query):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(query, into: &buf)
+            
         }
     }
 }
@@ -808,6 +818,28 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         case 1: return try FfiConverterString.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
+    }
+}
+
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
     }
 }
 
@@ -886,6 +918,16 @@ public func renderRemindersView(reminders: [Reminder]) throws -> [TuiAction] {
     )
 }
 
+public func setGlobalReminders(reminders: [Reminder], listNames: [String]) throws {
+    try rustCallWithError(FfiConverterTypeRemError.lift) {
+    uniffi_rem_core_fn_func_set_global_reminders(
+        FfiConverterSequenceTypeReminder.lower(reminders),
+        FfiConverterSequenceString.lower(listNames),$0)
+}
+}
+
+
+
 public func setReminders(reminders: [Reminder]) throws {
     try rustCallWithError(FfiConverterTypeRemError.lift) {
     uniffi_rem_core_fn_func_set_reminders(
@@ -920,6 +962,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_rem_core_checksum_func_render_reminders_view() != 27359) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_rem_core_checksum_func_set_global_reminders() != 46351) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rem_core_checksum_func_set_reminders() != 27881) {

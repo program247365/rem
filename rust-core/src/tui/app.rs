@@ -33,11 +33,69 @@ pub struct TUIApp {
     loading_animation_state: usize,
     last_animation_update: Option<Instant>,
     show_completed_todos: bool,
+    search_state: SearchState,
+    all_reminders: Vec<(Reminder, String)>, // (reminder, list_name) for global search
+}
+
+#[derive(Clone, Debug)]
+struct SearchState {
+    is_active: bool,
+    query: String,
+    is_global: bool, // true = search all lists, false = search current list
+    has_results: bool, // track if we have filtered results to show
+    last_escape_time: Option<Instant>, // for double-escape behavior
+}
+
+impl SearchState {
+    fn new() -> Self {
+        Self {
+            is_active: false,
+            query: String::new(),
+            is_global: false,
+            has_results: false,
+            last_escape_time: None,
+        }
+    }
+    
+    fn start_search(&mut self, is_global: bool) {
+        self.is_active = true;
+        self.is_global = is_global;
+        self.query.clear();
+        self.has_results = false;
+        self.last_escape_time = None;
+    }
+    
+    fn add_char(&mut self, c: char) {
+        if self.is_active {
+            self.query.push(c);
+            self.has_results = !self.query.is_empty();
+        }
+    }
+    
+    fn remove_char(&mut self) {
+        if self.is_active && !self.query.is_empty() {
+            self.query.pop();
+            self.has_results = !self.query.is_empty();
+        }
+    }
+    
+    fn exit_search(&mut self) {
+        self.is_active = false;
+        // Keep has_results to maintain filtering
+    }
+    
+    fn clear_search(&mut self) {
+        self.is_active = false;
+        self.query.clear();
+        self.has_results = false;
+        self.is_global = false;
+        self.last_escape_time = None;
+    }
 }
 
 
 #[derive(Clone, Debug)]
-enum AppView {
+pub enum AppView {
     Loading,
     Lists,
     Reminders { list_id: String },
@@ -97,13 +155,34 @@ impl TUIApp {
             loading_animation_state: 0,
             last_animation_update: None,
             show_completed_todos: false,
+            search_state: SearchState::new(),
+            all_reminders: Vec::new(),
         })
     }
 
     pub fn set_reminders(&mut self, reminders: Vec<Reminder>) {
-        self.current_reminders = reminders;
+        self.current_reminders = reminders.clone();
+        
+        // If we're in global search mode, also populate all_reminders for filtering
+        if self.search_state.is_global || self.is_in_global_search_view() {
+            // For global search, create all_reminders with a placeholder list name
+            // This will be populated correctly when we have proper list names
+            self.all_reminders = reminders.into_iter().map(|r| (r, "Unknown List".to_string())).collect();
+        }
+        
         self.selected_index = 0;
         self.list_state.select(if self.current_reminders.is_empty() { None } else { Some(0) });
+    }
+    
+    pub fn set_reminders_with_global_data(&mut self, reminders: Vec<Reminder>, all_reminders: Vec<(Reminder, String)>) {
+        self.current_reminders = reminders;
+        self.all_reminders = all_reminders;
+        self.selected_index = 0;
+        self.list_state.select(if self.current_reminders.is_empty() { None } else { Some(0) });
+    }
+    
+    pub fn set_all_reminders(&mut self, all_reminders: Vec<(Reminder, String)>) {
+        self.all_reminders = all_reminders;
     }
 
     pub fn add_status_log(&mut self, message: String) {
@@ -144,11 +223,36 @@ impl TUIApp {
     }
 
     fn get_filtered_reminders(&self) -> Vec<&Reminder> {
-        if self.show_completed_todos {
-            self.current_reminders.iter().collect()
+        // For global search, we need to search across all reminders
+        let base_reminders: Vec<&Reminder> = if self.search_state.is_global {
+            // Use all_reminders for global search (regardless of has_results)
+            if self.show_completed_todos {
+                self.all_reminders.iter().map(|(r, _)| r).collect()
+            } else {
+                self.all_reminders.iter().map(|(r, _)| r).filter(|r| !r.completed).collect()
+            }
         } else {
-            self.current_reminders.iter().filter(|r| !r.completed).collect()
+            // Use current_reminders for list-specific view
+            if self.show_completed_todos {
+                self.current_reminders.iter().collect()
+            } else {
+                self.current_reminders.iter().filter(|r| !r.completed).collect()
+            }
+        };
+        
+        let mut reminders = base_reminders;
+        
+        // Apply search filter if active
+        if self.search_state.has_results && !self.search_state.query.is_empty() {
+            let query = self.search_state.query.to_lowercase();
+            reminders.retain(|reminder| {
+                // Search in title and notes
+                reminder.title.to_lowercase().contains(&query) ||
+                reminder.notes.as_ref().map_or(false, |notes| notes.to_lowercase().contains(&query))
+            });
         }
+        
+        reminders
     }
 
     // Public method for testing
@@ -163,6 +267,69 @@ impl TUIApp {
 
     pub fn set_show_completed_todos(&mut self, show: bool) {
         self.show_completed_todos = show;
+    }
+
+    // Search-related public methods for testing
+    pub fn is_search_active(&self) -> bool {
+        self.search_state.is_active
+    }
+
+    pub fn get_search_query(&self) -> &str {
+        &self.search_state.query
+    }
+
+    pub fn start_global_search(&mut self) {
+        self.search_state.start_search(true);
+    }
+
+    pub fn start_list_search(&mut self) {
+        self.search_state.start_search(false);
+    }
+
+    pub fn add_search_char(&mut self, c: char) {
+        self.search_state.add_char(c);
+    }
+
+    pub fn remove_search_char(&mut self) {
+        self.search_state.remove_char();
+    }
+
+    pub fn clear_search(&mut self) {
+        self.search_state.clear_search();
+    }
+
+    pub fn exit_search(&mut self) {
+        self.search_state.exit_search();
+    }
+
+    pub fn is_global_search(&self) -> bool {
+        self.search_state.is_global
+    }
+
+    pub fn has_search_results(&self) -> bool {
+        self.search_state.has_results
+    }
+
+    // Additional test helper methods
+    pub fn get_current_view(&self) -> &AppView {
+        &self.current_view
+    }
+
+    pub fn set_current_view(&mut self, view: AppView) {
+        self.current_view = view;
+    }
+
+    // Helper method to get list name for a reminder in global search
+    pub fn get_list_name_for_reminder(&self, reminder_id: &str) -> Option<&str> {
+        self.all_reminders
+            .iter()
+            .find(|(r, _)| r.id == reminder_id)
+            .map(|(_, list_name)| list_name.as_str())
+    }
+
+    // Check if we're currently in global search mode
+    pub fn is_in_global_search_view(&self) -> bool {
+        matches!(&self.current_view, AppView::Reminders { list_id } if list_id == "global")
     }
 
     pub fn run(&mut self) -> Result<Vec<TuiAction>, RemError> {
@@ -261,6 +428,55 @@ impl TUIApp {
     }
 
     fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) {
+        // Handle search mode first
+        if self.search_state.is_active {
+            self.handle_search_key_event(key);
+            return;
+        }
+        
+        // Special handling for global search view when search is not active
+        if self.is_in_global_search_view() && !self.search_state.is_active {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    self.search_state.clear_search();
+                    self.current_view = AppView::Lists;
+                    self.actions.push(TuiAction::Back);
+                    self.add_status_log("🔍 Global search closed".to_string());
+                    return;
+                }
+                KeyCode::Char('/') => {
+                    self.search_state.start_search(true); // Re-activate global search
+                    self.add_status_log("🔍 Global search reactivated...".to_string());
+                    return;
+                }
+                _ => {
+                    // For other keys, fall through to normal reminders handling
+                }
+            }
+        }
+        
+        // Handle search activation
+        if key.code == KeyCode::Char('/') {
+            match &self.current_view {
+                AppView::Lists => {
+                    self.search_state.start_search(true); // Global search from lists
+                    self.add_status_log("🔍 Global search started...".to_string());
+                    // Switch to reminders view with special global identifier
+                    self.current_view = AppView::Reminders { list_id: "global".to_string() };
+                    // Trigger loading of all reminders
+                    self.actions.push(TuiAction::GlobalSearch { query: "".to_string() });
+                    return;
+                }
+                AppView::Reminders { .. } => {
+                    self.search_state.start_search(false); // List-specific search
+                    self.add_status_log("🔍 List search started...".to_string());
+                    return;
+                }
+                _ => {}
+            }
+        }
+        
+        // Handle normal view logic
         match &self.current_view {
             AppView::Loading => {
                 // Only allow quit during loading
@@ -277,6 +493,78 @@ impl TUIApp {
         // Update last key for sequence tracking with timing
         self.last_key = Some(key.code);
         self.last_key_time = Some(Instant::now());
+    }
+
+    fn handle_search_key_event(&mut self, key: crossterm::event::KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                let now = Instant::now();
+                if let Some(last_escape) = self.search_state.last_escape_time {
+                    // Double escape within 1 second = clear search completely
+                    if now.duration_since(last_escape) < Duration::from_millis(1000) {
+                        self.search_state.clear_search();
+                        self.reset_selection_for_filtered_reminders();
+                        
+                        // For global search, go back to Lists view
+                        if self.is_in_global_search_view() {
+                            self.current_view = AppView::Lists;
+                            self.actions.push(TuiAction::Back);
+                            self.add_status_log("🔍 Global search closed".to_string());
+                        } else {
+                            self.add_status_log("🔍 Search cleared".to_string());
+                        }
+                        return;
+                    }
+                }
+                // Single escape = exit search mode but keep results
+                self.search_state.exit_search();
+                self.search_state.last_escape_time = Some(now);
+                
+                // For global search, first escape goes back to Lists view
+                if self.is_in_global_search_view() {
+                    self.current_view = AppView::Lists;
+                    self.actions.push(TuiAction::Back);
+                    self.add_status_log("🔍 Global search closed".to_string());
+                } else {
+                    self.add_status_log("🔍 Search mode exited (ESC again to clear)".to_string());
+                }
+            }
+            KeyCode::Char(c) => {
+                self.search_state.add_char(c);
+                self.update_search_results();
+                self.reset_selection_for_filtered_reminders();
+            }
+            KeyCode::Backspace => {
+                self.search_state.remove_char();
+                self.update_search_results();
+                self.reset_selection_for_filtered_reminders();
+            }
+            KeyCode::Enter => {
+                // Enter confirms search and exits search mode
+                self.search_state.exit_search();
+                let query = &self.search_state.query;
+                if !query.is_empty() {
+                    self.add_status_log(format!("🔍 Search for '{}' applied", query));
+                } else {
+                    self.search_state.clear_search();
+                    self.add_status_log("🔍 Search cleared".to_string());
+                }
+                self.reset_selection_for_filtered_reminders();
+            }
+            _ => {
+                // Ignore other keys in search mode
+            }
+        }
+    }
+
+    fn update_search_results(&mut self) {
+        let query = &self.search_state.query;
+        self.search_state.has_results = !query.is_empty();
+        
+        if !query.is_empty() {
+            let search_type = if self.search_state.is_global { "global" } else { "list" };
+            self.add_status_log(format!("🔍 {} search: '{}'", search_type, query));
+        }
     }
 
     fn handle_lists_key_event(&mut self, key: crossterm::event::KeyEvent) {
@@ -335,9 +623,14 @@ impl TUIApp {
         }
     }
 
-    fn handle_reminders_key_event(&mut self, key: crossterm::event::KeyEvent, _list_id: String) {
+    fn handle_reminders_key_event(&mut self, key: crossterm::event::KeyEvent, list_id: String) {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
+                // For global search, clear search state when going back
+                if list_id == "global" {
+                    self.search_state.clear_search();
+                    self.add_status_log("🔍 Global search closed".to_string());
+                }
                 self.actions.push(TuiAction::Back);
                 self.current_view = AppView::Lists;
             }
@@ -397,7 +690,7 @@ impl TUIApp {
             }
             KeyCode::Char('c') => {
                 self.previous_view = Some(self.current_view.clone());
-                self.create_form = Some(CreateReminderForm::new(&self.lists, Some(_list_id.clone())));
+                self.create_form = Some(CreateReminderForm::new(&self.lists, Some(list_id.clone())));
                 self.current_view = AppView::CreateReminder;
             }
             KeyCode::Char('h') => {
@@ -782,11 +1075,7 @@ impl TUIApp {
     fn render_reminders(&mut self, f: &mut Frame) {
         let area = f.area();
         
-        let filtered_reminders: Vec<Reminder> = if self.show_completed_todos {
-            self.current_reminders.clone()
-        } else {
-            self.current_reminders.iter().filter(|r| !r.completed).cloned().collect()
-        };
+        let filtered_reminders: Vec<Reminder> = self.get_filtered_reminders().into_iter().cloned().collect();
         
         if filtered_reminders.is_empty() {
             let message = if self.current_reminders.is_empty() {
@@ -817,7 +1106,7 @@ impl TUIApp {
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
                         .title(Span::styled(
-                            " 📝 Reminders ",
+                            if self.is_in_global_search_view() { " 🔍 Global Search " } else { " 📝 Reminders " },
                             Style::default()
                                 .fg(Color::Blue)
                                 .add_modifier(Modifier::BOLD)
@@ -831,15 +1120,36 @@ impl TUIApp {
             return;
         }
 
-        let main_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),     // Reminders content
-                Constraint::Length(4),  // Controls
-                Constraint::Length(3)   // Status log
-            ])
-            .margin(1)
-            .split(area);
+        let main_layout = if self.search_state.is_active || self.search_state.has_results {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),  // Search bar
+                    Constraint::Min(0),     // Reminders content
+                    Constraint::Length(4),  // Controls
+                    Constraint::Length(3)   // Status log
+                ])
+                .margin(1)
+                .split(area)
+        } else {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(0),     // Reminders content
+                    Constraint::Length(4),  // Controls
+                    Constraint::Length(3)   // Status log
+                ])
+                .margin(1)
+                .split(area)
+        };
+
+        // Render search bar if active or has results
+        let content_index = if self.search_state.is_active || self.search_state.has_results {
+            self.render_search_bar(f, main_layout[0]);
+            1 // Content area index when search bar is shown
+        } else {
+            0 // Content area index when no search bar
+        };
 
         // Create reminder items
         let items: Vec<ListItem> = filtered_reminders
@@ -856,27 +1166,41 @@ impl TUIApp {
                 };
                 let title_modifier = if reminder.completed { Modifier::CROSSED_OUT } else { Modifier::empty() };
 
-                let mut lines = vec![
-                    Line::from(vec![
-                        Span::styled(
-                            if is_selected { "▶ " } else { "  " },
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-                        ),
-                        Span::styled(
-                            checkbox,
-                            Style::default()
-                                .fg(if reminder.completed { Color::Green } else { Color::Gray })
-                                .add_modifier(Modifier::BOLD)
-                        ),
-                        Span::raw("  "),
-                        Span::styled(
-                            &reminder.title,
-                            Style::default()
-                                .fg(title_color)
-                                .add_modifier(title_modifier | if is_selected { Modifier::UNDERLINED } else { Modifier::empty() })
-                        ),
-                    ]),
+                // Build the title line with optional list name for global search
+                let mut title_spans = vec![
+                    Span::styled(
+                        if is_selected { "▶ " } else { "  " },
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    ),
+                    Span::styled(
+                        checkbox,
+                        Style::default()
+                            .fg(if reminder.completed { Color::Green } else { Color::Gray })
+                            .add_modifier(Modifier::BOLD)
+                    ),
+                    Span::raw("  "),
                 ];
+
+                // Add list name for global search
+                if self.is_in_global_search_view() {
+                    if let Some(list_name) = self.get_list_name_for_reminder(&reminder.id) {
+                        title_spans.push(Span::styled(
+                            format!("[{}] ",list_name),
+                            Style::default()
+                                .fg(Color::LightBlue)
+                                .add_modifier(Modifier::BOLD)
+                        ));
+                    }
+                }
+
+                title_spans.push(Span::styled(
+                    &reminder.title,
+                    Style::default()
+                        .fg(title_color)
+                        .add_modifier(title_modifier | if is_selected { Modifier::UNDERLINED } else { Modifier::empty() })
+                ));
+
+                let mut lines = vec![Line::from(title_spans)];
 
                 if let Some(notes) = &reminder.notes {
                     if !notes.is_empty() {
@@ -912,7 +1236,7 @@ impl TUIApp {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .title(Span::styled(
-                        " 📝 Reminders ",
+                        if self.is_in_global_search_view() { " 🔍 Global Search " } else { " 📝 Reminders " },
                         Style::default()
                             .fg(Color::Blue)
                             .add_modifier(Modifier::BOLD)
@@ -927,31 +1251,68 @@ impl TUIApp {
                     .add_modifier(Modifier::BOLD)
             );
 
-        f.render_stateful_widget(list_widget, main_layout[0], &mut self.list_state);
+        f.render_stateful_widget(list_widget, main_layout[content_index], &mut self.list_state);
 
         // Instructions
         let visibility_text = if self.show_completed_todos { "hide completed" } else { "show completed" };
         let visibility_display = format!(" {}  ", visibility_text);
-        let instructions = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-                Span::styled(" or ", Style::default().fg(Color::Gray)),
-                Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-                Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
-                Span::styled("⏎/space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-                Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
-                Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-                Span::styled(" delete", Style::default().fg(Color::Gray)),
-            ]),
-            Line::from(vec![
-                Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-                Span::styled(" create  ", Style::default().fg(Color::Gray)),
-                Span::styled("h", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-                Span::styled(visibility_display, Style::default().fg(Color::Gray)),
-                Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-                Span::styled(" back", Style::default().fg(Color::Gray)),
-            ]),
-        ])
+        
+        // Different instructions for global search
+        let instructions = if self.is_in_global_search_view() {
+            let mut lines = vec![
+                Line::from(vec![
+                    Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" or ", Style::default().fg(Color::Gray)),
+                    Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
+                    Span::styled("⏎/space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
+                    Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" delete", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled("h", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(visibility_display, Style::default().fg(Color::Gray)),
+                    Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" or ", Style::default().fg(Color::Gray)),
+                    Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" back to lists", Style::default().fg(Color::Gray)),
+                ]),
+            ];
+            
+            // Add search instructions if search is active
+            if self.search_state.is_active {
+                lines.push(Line::from(vec![
+                    Span::styled("Type", Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" to search  ", Style::default().fg(Color::Gray)),
+                    Span::styled("Backspace", Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" to delete", Style::default().fg(Color::Gray)),
+                ]));
+            }
+            
+            Paragraph::new(lines)
+        } else {
+            Paragraph::new(vec![
+                Line::from(vec![
+                    Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" or ", Style::default().fg(Color::Gray)),
+                    Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
+                    Span::styled("⏎/space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
+                    Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" delete", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" create  ", Style::default().fg(Color::Gray)),
+                    Span::styled("h", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(visibility_display, Style::default().fg(Color::Gray)),
+                    Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                    Span::styled(" back", Style::default().fg(Color::Gray)),
+                ]),
+            ])
+        }
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -965,10 +1326,68 @@ impl TUIApp {
         )
         .alignment(Alignment::Center);
 
-        f.render_widget(instructions, main_layout[1]);
+        f.render_widget(instructions, main_layout[content_index + 1]);
         
         // Status log
-        self.render_status_log(f, main_layout[2]);
+        self.render_status_log(f, main_layout[content_index + 2]);
+    }
+
+    fn render_search_bar(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+        let search_type = if self.search_state.is_global { "Global" } else { "List" };
+        let title = format!(" 🔍 {} Search ", search_type);
+        
+        let search_text = if self.search_state.is_active {
+            format!("{}_", self.search_state.query) // Show cursor with underscore
+        } else {
+            self.search_state.query.clone()
+        };
+        
+        let placeholder = if search_text.is_empty() && !self.search_state.is_active {
+            if self.search_state.is_global {
+                "Press '/' to search all reminders..."
+            } else {
+                "Press '/' to search this list..."
+            }
+        } else {
+            ""
+        };
+        
+        let display_text = if !placeholder.is_empty() {
+            placeholder
+        } else {
+            &search_text
+        };
+        
+        let text_color = if self.search_state.is_active {
+            Color::Yellow
+        } else if !self.search_state.query.is_empty() {
+            Color::Green
+        } else {
+            Color::Gray
+        };
+        
+        let border_color = if self.search_state.is_active {
+            Color::Yellow
+        } else {
+            Color::Blue
+        };
+        
+        let search_paragraph = Paragraph::new(display_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(Span::styled(
+                        title,
+                        Style::default().fg(border_color).add_modifier(Modifier::BOLD)
+                    ))
+                    .title_alignment(Alignment::Left)
+                    .style(Style::default().fg(border_color))
+            )
+            .style(Style::default().fg(text_color))
+            .alignment(Alignment::Left);
+        
+        f.render_widget(search_paragraph, area);
     }
 
     fn render_create_reminder(&mut self, f: &mut Frame) {

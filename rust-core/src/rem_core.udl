@@ -7,6 +7,11 @@ namespace rem_core {
     
     [Throws=RemError]
     void set_reminders(sequence<Reminder> reminders);
+    
+    [Throws=RemError]
+    void set_global_reminders(sequence<Reminder> reminders, sequence<string> list_names);
+    
+    
 };
 
 dictionary ReminderList {
@@ -33,6 +38,7 @@ dictionary NewReminder {
     u8 priority;
 };
 
+
 [Enum]
 interface TuiAction {
     Quit();
@@ -43,6 +49,7 @@ interface TuiAction {
     Back();
     Refresh();
     ToggleCompletedVisibility();
+    GlobalSearch(string query);
 };
 
 [Error]

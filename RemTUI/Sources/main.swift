@@ -97,6 +97,48 @@ struct RemTUIApp {
                     case .refresh:
                         currentLists = try await remindersService.fetchLists()
                         
+                    case .globalSearch(_):
+                        do {
+                            // Load all reminders from all lists for global search with list names
+                            var allReminders: [Reminder] = []
+                            var listNames: [String] = []
+                            
+                            for list in currentLists {
+                                let listReminders = try await remindersService.fetchReminders(for: list.id)
+                                for reminder in listReminders {
+                                    allReminders.append(reminder)
+                                    listNames.append(list.name)
+                                }
+                            }
+                            
+                            // Set all reminders with list names for global search
+                            try setGlobalReminders(reminders: allReminders, listNames: listNames)
+                            
+                            // Continue with reminders view loop for global search
+                            let reminderActions = try renderRemindersView(reminders: allReminders)
+                            
+                            for reminderAction in reminderActions {
+                                switch reminderAction {
+                                case .quit:
+                                    shouldExit = true
+                                    break
+                                case .back:
+                                    break
+                                case .toggleReminder(let reminderId):
+                                    try await remindersService.toggleReminder(reminderId)
+                                case .deleteReminder(let reminderId):
+                                    try await remindersService.deleteReminder(reminderId)
+                                case .createReminder(let newReminder):
+                                    try await remindersService.createReminder(newReminder)
+                                default:
+                                    break
+                                }
+                            }
+                        } catch {
+                            // Handle error and continue
+                            print("❌ Global search error: \(error)")
+                        }
+                        
                     default:
                         break
                     }
