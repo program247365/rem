@@ -1424,8 +1424,6 @@ impl TUIApp {
                             count_text,
                             Style::default().fg(if list.count == 0 {
                                 Color::DarkGray
-                            } else if is_selected {
-                                Color::Gray
                             } else {
                                 Color::Gray
                             }),
@@ -1650,8 +1648,6 @@ impl TUIApp {
                     } else {
                         Color::Gray
                     }
-                } else if is_selected {
-                    Color::White
                 } else {
                     Color::White
                 };
