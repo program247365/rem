@@ -333,7 +333,9 @@ ci-run-swift-tests: ## CI: Run Swift tests
 	@make test-swift
 
 ci-check-code-quality: ## CI: Check code quality
-	@make check
+	@make check-rust
+	@make build-uniffi
+	@make check-swift
 
 ci-build-release: ## CI: Build release
 	@make build
