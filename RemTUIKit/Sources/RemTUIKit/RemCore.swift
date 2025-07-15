@@ -695,6 +695,7 @@ public enum TuiAction {
     case createReminder(newReminder: NewReminder)
     case back
     case refresh
+    case toggleCompletedVisibility
 }
 
 public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
@@ -725,6 +726,8 @@ public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
         case 6: return .back
         
         case 7: return .refresh
+        
+        case 8: return .toggleCompletedVisibility
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -764,6 +767,10 @@ public struct FfiConverterTypeTuiAction: FfiConverterRustBuffer {
         
         case .refresh:
             writeInt(&buf, Int32(7))
+        
+        
+        case .toggleCompletedVisibility:
+            writeInt(&buf, Int32(8))
         
         }
     }

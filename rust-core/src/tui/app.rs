@@ -33,6 +33,7 @@ pub struct TUIApp {
     pending_operations: Vec<PendingOperation>,
     loading_animation_state: usize,
     last_animation_update: Option<Instant>,
+    show_completed_todos: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +105,7 @@ impl TUIApp {
             pending_operations: Vec::new(),
             loading_animation_state: 0,
             last_animation_update: None,
+            show_completed_todos: false,
         })
     }
 
@@ -135,6 +137,41 @@ impl TUIApp {
             self.current_view = AppView::Lists;
             self.add_status_log("✅ Lists loaded successfully".to_string());
         }
+    }
+
+    fn reset_selection_for_filtered_reminders(&mut self) {
+        let filtered_count = self.get_filtered_reminders().len();
+        if filtered_count == 0 {
+            self.selected_index = 0;
+            self.list_state.select(None);
+        } else {
+            if self.selected_index >= filtered_count {
+                self.selected_index = filtered_count - 1;
+            }
+            self.list_state.select(Some(self.selected_index));
+        }
+    }
+
+    fn get_filtered_reminders(&self) -> Vec<&Reminder> {
+        if self.show_completed_todos {
+            self.current_reminders.iter().collect()
+        } else {
+            self.current_reminders.iter().filter(|r| !r.completed).collect()
+        }
+    }
+
+    // Public method for testing
+    pub fn get_filtered_reminders_for_test(&self) -> Vec<&Reminder> {
+        self.get_filtered_reminders()
+    }
+
+    // Public field access for testing
+    pub fn show_completed_todos(&self) -> bool {
+        self.show_completed_todos
+    }
+
+    pub fn set_show_completed_todos(&mut self, show: bool) {
+        self.show_completed_todos = show;
     }
 
     pub fn run(&mut self) -> Result<Vec<TuiAction>, RemError> {
@@ -297,6 +334,13 @@ impl TUIApp {
                 self.create_form = Some(CreateReminderForm::new(&self.lists, default_list_id.clone()));
                 self.current_view = AppView::CreateReminder;
             }
+            KeyCode::Char('h') => {
+                self.show_completed_todos = !self.show_completed_todos;
+                let status = if self.show_completed_todos { "shown" } else { "hidden" };
+                self.add_status_log(format!("👁️ Completed todos {}", status));
+                // Note: We don't push the action here as this is for lists view
+                // The action would cause the app to exit this view
+            }
             _ => {}
         }
     }
@@ -308,18 +352,20 @@ impl TUIApp {
                 self.current_view = AppView::Lists;
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if !self.current_reminders.is_empty() {
+                let filtered_reminders = self.get_filtered_reminders();
+                if !filtered_reminders.is_empty() {
                     if self.selected_index > 0 {
                         self.selected_index -= 1;
                     } else {
-                        self.selected_index = self.current_reminders.len() - 1;
+                        self.selected_index = filtered_reminders.len() - 1;
                     }
                     self.list_state.select(Some(self.selected_index));
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if !self.current_reminders.is_empty() {
-                    if self.selected_index < self.current_reminders.len() - 1 {
+                let filtered_reminders = self.get_filtered_reminders();
+                if !filtered_reminders.is_empty() {
+                    if self.selected_index < filtered_reminders.len() - 1 {
                         self.selected_index += 1;
                     } else {
                         self.selected_index = 0;
@@ -328,7 +374,8 @@ impl TUIApp {
                 }
             }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                if let Some(reminder) = self.current_reminders.get(self.selected_index) {
+                let filtered_reminders = self.get_filtered_reminders();
+                if let Some(reminder) = filtered_reminders.get(self.selected_index) {
                     let reminder_id = reminder.id.clone();
                     self.pending_operations.push(PendingOperation::ToggleReminder { reminder_id: reminder_id.clone() });
                     self.add_status_log("✅ Toggling reminder...".to_string());
@@ -345,7 +392,8 @@ impl TUIApp {
                 };
 
                 if is_dd_sequence {
-                    if let Some(reminder) = self.current_reminders.get(self.selected_index) {
+                    let filtered_reminders = self.get_filtered_reminders();
+                    if let Some(reminder) = filtered_reminders.get(self.selected_index) {
                         self.actions.push(TuiAction::DeleteReminder { reminder_id: reminder.id.clone() });
                     }
                 }
@@ -353,7 +401,8 @@ impl TUIApp {
             }
             KeyCode::Delete => {
                 // Alternative: Use Delete key for immediate deletion (no sequence needed)
-                if let Some(reminder) = self.current_reminders.get(self.selected_index) {
+                let filtered_reminders = self.get_filtered_reminders();
+                if let Some(reminder) = filtered_reminders.get(self.selected_index) {
                     self.actions.push(TuiAction::DeleteReminder { reminder_id: reminder.id.clone() });
                 }
             }
@@ -361,6 +410,14 @@ impl TUIApp {
                 self.previous_view = Some(self.current_view.clone());
                 self.create_form = Some(CreateReminderForm::new(&self.lists, Some(_list_id.clone())));
                 self.current_view = AppView::CreateReminder;
+            }
+            KeyCode::Char('h') => {
+                self.show_completed_todos = !self.show_completed_todos;
+                let status = if self.show_completed_todos { "shown" } else { "hidden" };
+                self.add_status_log(format!("👁️ Completed todos {}", status));
+                // Reset selection to ensure we stay within filtered bounds
+                self.reset_selection_for_filtered_reminders();
+                // Don't push action - handle entirely within TUI for immediate re-render
             }
             _ => {}
         }
@@ -694,18 +751,26 @@ impl TUIApp {
         f.render_stateful_widget(list_widget, main_layout[0], &mut self.list_state);
 
         // Instructions
-        let instructions = Paragraph::new(vec![Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" or ", Style::default().fg(Color::Gray)),
-            Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
-            Span::styled("⏎", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" select  ", Style::default().fg(Color::Gray)),
-            Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" create  ", Style::default().fg(Color::Gray)),
-            Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" quit", Style::default().fg(Color::Gray)),
-        ])])
+        let visibility_text = if self.show_completed_todos { "hide completed" } else { "show completed" };
+        let visibility_display = format!(" {}  ", visibility_text);
+        let instructions = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" or ", Style::default().fg(Color::Gray)),
+                Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
+                Span::styled("⏎", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" select  ", Style::default().fg(Color::Gray)),
+                Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" create", Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(vec![
+                Span::styled("h", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(visibility_display, Style::default().fg(Color::Gray)),
+                Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" quit", Style::default().fg(Color::Gray)),
+            ]),
+        ])
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -728,12 +793,24 @@ impl TUIApp {
     fn render_reminders(&mut self, f: &mut Frame) {
         let area = f.area();
         
-        if self.current_reminders.is_empty() {
+        let filtered_reminders: Vec<Reminder> = if self.show_completed_todos {
+            self.current_reminders.clone()
+        } else {
+            self.current_reminders.iter().filter(|r| !r.completed).cloned().collect()
+        };
+        
+        if filtered_reminders.is_empty() {
+            let message = if self.current_reminders.is_empty() {
+                "📭 No reminders in this list"
+            } else {
+                "📭 No incomplete reminders (press 'h' to show completed)"
+            };
+            
             let empty_text = vec![
                 Line::from(""),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "📭 No reminders in this list",
+                    message,
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
@@ -776,15 +853,18 @@ impl TUIApp {
             .split(area);
 
         // Create reminder items
-        let items: Vec<ListItem> = self
-            .current_reminders
+        let items: Vec<ListItem> = filtered_reminders
             .iter()
             .enumerate()
             .map(|(i, reminder)| {
                 let is_selected = i == self.selected_index;
                 
                 let checkbox = if reminder.completed { "☑" } else { "☐" };
-                let title_color = if reminder.completed { Color::DarkGray } else { Color::White };
+                let title_color = if reminder.completed {
+                    if is_selected { Color::LightBlue } else { Color::Gray }
+                } else {
+                    if is_selected { Color::White } else { Color::White }
+                };
                 let title_modifier = if reminder.completed { Modifier::CROSSED_OUT } else { Modifier::empty() };
 
                 let mut lines = vec![
@@ -821,7 +901,7 @@ impl TUIApp {
                     }
                 }
 
-                if i < self.current_reminders.len() - 1 {
+                if i < filtered_reminders.len() - 1 {
                     lines.push(Line::from(""));
                 }
 
@@ -861,20 +941,28 @@ impl TUIApp {
         f.render_stateful_widget(list_widget, main_layout[0], &mut self.list_state);
 
         // Instructions
-        let instructions = Paragraph::new(vec![Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" or ", Style::default().fg(Color::Gray)),
-            Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
-            Span::styled("⏎/space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
-            Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" delete  ", Style::default().fg(Color::Gray)),
-            Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" create  ", Style::default().fg(Color::Gray)),
-            Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
-            Span::styled(" back", Style::default().fg(Color::Gray)),
-        ])])
+        let visibility_text = if self.show_completed_todos { "hide completed" } else { "show completed" };
+        let visibility_display = format!(" {}  ", visibility_text);
+        let instructions = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" or ", Style::default().fg(Color::Gray)),
+                Span::styled("j/k", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" navigate  ", Style::default().fg(Color::Gray)),
+                Span::styled("⏎/space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" toggle  ", Style::default().fg(Color::Gray)),
+                Span::styled("dd/Del", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" delete", Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(vec![
+                Span::styled("c", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" create  ", Style::default().fg(Color::Gray)),
+                Span::styled("h", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(visibility_display, Style::default().fg(Color::Gray)),
+                Span::styled("q", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD).bg(Color::DarkGray)),
+                Span::styled(" back", Style::default().fg(Color::Gray)),
+            ]),
+        ])
         .block(
             Block::default()
                 .borders(Borders::ALL)

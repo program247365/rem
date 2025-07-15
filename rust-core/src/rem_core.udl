@@ -42,6 +42,7 @@ interface TuiAction {
     CreateReminder(NewReminder new_reminder);
     Back();
     Refresh();
+    ToggleCompletedVisibility();
 };
 
 [Error]

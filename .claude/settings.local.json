@@ -25,7 +25,9 @@
       "Bash(tty)",
       "Bash(./build.sh)",
       "Bash(.build/release/RemTUI)",
-      "Bash(nm:*)"
+      "Bash(nm:*)",
+      "Bash(/Users/kevin/.kevin/code/rem/test-toggle-functionality.swift)",
+      "Bash(/Users/kevin/.kevin/code/rem/test-color-visibility.swift)"
     ],
     "deny": []
   }
